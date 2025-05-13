@@ -92,7 +92,7 @@ class FileCompressorApp:
         self.detect_language()  # 自動檢測系統語言
 
         self.root.title(self.get_translation("app_title"))  # 設定視窗標題
-        self.root.geometry("800x600")  # 調整視窗大小
+        self.root.geometry("900x650")  # 調整視窗大小
         self.style = ttk.Style("superhero")  # 使用 ttkbootstrap 的 "superhero" 主題
 
         # 初始化變數
@@ -103,7 +103,11 @@ class FileCompressorApp:
         self.create_widgets()
 
     def create_widgets(self):
-        """建立 UI 元件"""
+        #"""建立 UI 元件"""
+        # 定義按鈕樣式
+        style = ttk.Style()
+        style.configure("Custom.TButton", font=('微軟正黑體', 13))  # 設定按鈕字體大小
+
         # 按鈕區域
         button_frame = ttk.Frame(self.root)  # 按鈕框架
         button_frame.pack(pady=5, anchor='w')  # 設定框架位置
@@ -111,19 +115,19 @@ class FileCompressorApp:
         button_width = 10  # 按鈕寬度
 
         # 檢查按鈕
-        self.btn_check = ttk.Button(button_frame, text=self.get_translation("check"), command=self.check_size, width=button_width, bootstyle="success")  # 綠色按鈕
+        self.btn_check = ttk.Button(button_frame, text=self.get_translation("check"), command=self.check_size, width=button_width, bootstyle="success", style="Custom.TButton")  # 綠色按鈕
         self.btn_check.pack(side=LEFT, padx=5)
 
         # 壓縮按鈕
-        self.btn_compress = ttk.Button(button_frame, text=self.get_translation("compress"), command=self.start_compress, width=button_width, bootstyle="primary")  # 藍色按鈕
+        self.btn_compress = ttk.Button(button_frame, text=self.get_translation("compress"), command=self.start_compress, width=button_width, bootstyle="primary", style="Custom.TButton")  # 藍色按鈕
         self.btn_compress.pack(side=LEFT, padx=5)
 
         # 複製按鈕
-        self.btn_copy = ttk.Button(button_frame, text=self.get_translation("copy"), command=self.copy_files, width=button_width, bootstyle="warning")  # 黃色按鈕
+        self.btn_copy = ttk.Button(button_frame, text=self.get_translation("copy"), command=self.copy_files, width=button_width, bootstyle="warning", style="Custom.TButton")  # 黃色按鈕
         self.btn_copy.pack(side=LEFT, padx=5)
 
         # 語言切換按鈕
-        self.btn_toggle_language = ttk.Button(button_frame, text=self.get_translation("toggle_language"), command=self.toggle_language, bootstyle="danger")  # 紅色按鈕
+        self.btn_toggle_language = ttk.Button(button_frame, text=self.get_translation("toggle_language"), command=self.toggle_language, bootstyle="danger", style="Custom.TButton")  # 紅色按鈕
         self.btn_toggle_language.pack(side=LEFT, padx=5)
 
         # 勾選框區域
@@ -333,7 +337,7 @@ class FileCompressorApp:
         if self.is_running:
             messagebox.showinfo("完成", self.get_translation("compression_complete"))
         self.is_running = False
-
+        
     def update_progress_label(self, current_size, total_size):
         """更新進度條標籤"""
         progress_percentage = int((current_size / total_size) * 100) if total_size > 0 else 0
@@ -342,12 +346,12 @@ class FileCompressorApp:
 
     def copy_files(self):
         """複製勾選的資料夾內容到使用者指定的目標資料夾"""
-        target_folder = filedialog.askdirectory(title="選擇目標資料夾")  # 彈出選擇資料夾視窗
-        if not target_folder:
-            self.log_action("未選擇目標資料夾，複製操作已取消。")
+        if not self.default_path:
+            self.log_action("未選擇存檔位置，複製操作已取消。")
+            messagebox.showwarning("警告", "請先選擇存檔位置！")
             return
 
-        target_folder = Path(target_folder)
+        target_folder = Path(self.default_path)
         self.log_action(f"目標資料夾: {target_folder}")
 
         for folder_name, var in self.checkboxes.items():
@@ -365,12 +369,11 @@ class FileCompressorApp:
                     self.log_action(f"{self.get_translation('folder_not_found')}{source_folder}")
 
         messagebox.showinfo("完成", "所有選定的資料夾已成功複製。")
-
     def show_about(self):
         """顯示關於視窗"""
         about_window = ttk.Toplevel(self.root)  # 建立新視窗
         about_window.title(self.get_translation("about"))  # 設定視窗標題
-        about_window.geometry("300x200")  # 設定視窗大小
+        about_window.geometry("300x400")  # 設定視窗大小
         about_window.resizable(False, False)  # 禁止調整視窗大小
 
         # 顯示作者資訊
