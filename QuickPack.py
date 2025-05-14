@@ -72,7 +72,7 @@ class FileCompressorApp:
             "contact": {"zh": "透過信箱聯絡我們(請點擊)", "ja": "メールでお問い合わせください（クリックしてください）"},
             "bookmarks": {"zh": "書籤", "ja": "ブックマーク"},
             "signatures": {"zh": "簽名檔", "ja": "署名ファイル"},
-            "constructor": {"zh": "鼎新", "ja": "コンストラクタ"}
+            "Conductor": {"zh": "鼎新", "ja": "コンストラクタ"}
         }
 
         # 勾選框對應的資料夾名稱
@@ -91,7 +91,7 @@ class FileCompressorApp:
                 "files": ["Bookmarks", "Bookmarks.bak"]
             },
             "signatures": {"path": os.getenv("APPDATA") + r"\Microsoft\Signatures", "files": None},
-            "constructor": {"path": r"C:\Consuctor", "files": None}
+            "Conductor": {"path": r"C:\Conductor", "files": None}
         }
 
         self.root.title(self.get_translation("app_title"))  # 設定視窗標題
