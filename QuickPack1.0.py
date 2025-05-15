@@ -2,6 +2,7 @@ import os
 import shutil
 from pathlib import Path
 import subprocess  # 用於執行 7z 命令
+import zipfile  # 修正 ZipFile 的導入
 import ttkbootstrap as ttk  # 使用 ttkbootstrap 替代 tkinter
 from ttkbootstrap.constants import *
 from tkinter import filedialog, messagebox, scrolledtext
@@ -72,7 +73,9 @@ class FileCompressorApp:
             "contact": {"zh": "透過信箱聯絡我們(請點擊)", "ja": "メールでお問い合わせください（クリックしてください）"},
             "bookmarks": {"zh": "書籤", "ja": "ブックマーク"},
             "signatures": {"zh": "簽名檔", "ja": "署名ファイル"},
-            "constructor": {"zh": "鼎新", "ja": "コンストラクタ"}
+            "Conductor": {"zh": "鼎新", "ja": "コンストラクタ"},
+            "quick_access": {"zh": "快速存取", "ja": "クイックアクセス"},
+            "network_shortcuts": {"zh": "網路磁碟", "ja": "ネットワークショートカット"}
         }
 
         # 勾選框對應的資料夾名稱
@@ -86,12 +89,20 @@ class FileCompressorApp:
 
         # 新增的特殊勾選框
         self.special_folders = {
+            "quick_access": {
+                "path": os.getenv("APPDATA") + r"\Microsoft\Windows\Recent\AutomaticDestinations",
+                "files": None
+            },
+            "network_shortcuts": {
+                "path": os.getenv("APPDATA") + r"\Microsoft\Windows\Network Shortcuts",
+                "files": None
+            },
             "bookmarks": {
                 "path": os.getenv("LOCALAPPDATA") + r"\Google\Chrome\User Data\Default",
                 "files": ["Bookmarks", "Bookmarks.bak"]
             },
             "signatures": {"path": os.getenv("APPDATA") + r"\Microsoft\Signatures", "files": None},
-            "constructor": {"path": r"C:\Consuctor", "files": None}
+            "Conductor": {"path": r"C:\Conductor", "files": None}
         }
 
         self.root.title(self.get_translation("app_title"))  # 設定視窗標題
@@ -108,6 +119,10 @@ class FileCompressorApp:
 
     def create_widgets(self):
         """建立 UI 元件"""
+        # 定義按鈕樣式
+        style = ttk.Style()
+        style.configure("Custom.TButton", font=('微軟正黑體', 11, 'bold'))  # 設定字體大小和粗體
+
         # 按鈕區域
         button_frame = ttk.Frame(self.root)  # 按鈕框架
         button_frame.pack(pady=5, anchor='w')  # 設定框架位置
@@ -115,19 +130,19 @@ class FileCompressorApp:
         button_width = 10  # 按鈕寬度
 
         # 檢查按鈕
-        self.btn_check = ttk.Button(button_frame, text=self.get_translation("check"), command=self.check_size, width=button_width, bootstyle="success")  # 綠色按鈕
+        self.btn_check = ttk.Button(button_frame, text=self.get_translation("check"), command=self.check_size, width=button_width, bootstyle="success", style="Custom.TButton")  # 綠色按鈕
         self.btn_check.pack(side=LEFT, padx=5)
 
         # 壓縮按鈕
-        self.btn_compress = ttk.Button(button_frame, text=self.get_translation("compress"), command=self.start_compress, width=button_width, bootstyle="primary")  # 藍色按鈕
+        self.btn_compress = ttk.Button(button_frame, text=self.get_translation("compress"), command=self.start_compress, width=button_width, bootstyle="primary", style="Custom.TButton")  # 藍色按鈕
         self.btn_compress.pack(side=LEFT, padx=5)
 
         # 複製按鈕
-        self.btn_copy = ttk.Button(button_frame, text=self.get_translation("copy"), command=self.copy_files, width=button_width, bootstyle="warning")  # 黃色按鈕
+        self.btn_copy = ttk.Button(button_frame, text=self.get_translation("copy"), command=self.copy_files, width=button_width, bootstyle="warning", style="Custom.TButton")  # 黃色按鈕
         self.btn_copy.pack(side=LEFT, padx=5)
 
         # 語言切換按鈕
-        self.btn_toggle_language = ttk.Button(button_frame, text=self.get_translation("toggle_language"), command=self.toggle_language, bootstyle="danger")  # 紅色按鈕
+        self.btn_toggle_language = ttk.Button(button_frame, text=self.get_translation("toggle_language"), command=self.toggle_language, bootstyle="danger", style="Custom.TButton")  # 紅色按鈕
         self.btn_toggle_language.pack(side=LEFT, padx=5)
 
         # 勾選框區域
@@ -150,9 +165,9 @@ class FileCompressorApp:
         self.info_frame = ttk.Frame(self.root)  # 信息框框架
         self.info_frame.pack(pady=10, anchor='w')
 
-        self.info_display_width = 50  # 信息框寬度
+        self.info_display_width = 40  # 信息框寬度
 
-        # 預設存檔路徑
+         # 預設存檔路徑
         self.default_path = f"Z:\\{Path.home().name}"  # 使用新的預設路徑
 
         # 顯示預設路徑
@@ -164,7 +179,14 @@ class FileCompressorApp:
         self.btn_choose_location.pack(side=LEFT, padx=5)
 
         # 日誌顯示框
-        self.action_display = scrolledtext.ScrolledText(self.root, height=15, width=90, bg="#263238", fg="white", font=('微軟正黑體', 10))  # 使用標準 ScrolledText
+        self.action_display = scrolledtext.ScrolledText(
+            self.root, 
+            height=15, 
+            width=72,  # 原寬度 90，縮小 1/5
+            bg="#263238", 
+            fg="white", 
+            font=('微軟正黑體', 12)  # 原文字大小 10，放大 2 個單位
+        )
         self.action_display.pack(pady=5, padx=10)
 
         # 進度條框架
@@ -172,8 +194,12 @@ class FileCompressorApp:
         self.progress_frame.pack(pady=5, anchor='w')
 
         # 進度條
-        self.progress_bar = ttk.Progressbar(self.progress_frame, length=700, mode='determinate')  # 調整進度條寬度
+        self.progress_bar = ttk.Progressbar(self.progress_frame, length=700, mode='determinate', style="Custom.Horizontal.TProgressbar")  # 調整進度條寬度
         self.progress_bar.pack(side=LEFT, padx=10, fill=X)
+
+        # 自定義進度條樣式，增加高度
+        style = ttk.Style()
+        style.configure("Custom.Horizontal.TProgressbar", thickness=15)  # 增加高度一個單位
 
         # 進度條標籤
         self.progress_label = ttk.Label(self.progress_frame, text="", bootstyle="light", font=('微軟正黑體', 10))
@@ -183,7 +209,6 @@ class FileCompressorApp:
         self.btn_about = ttk.Button(button_frame, text=self.get_translation("about"), command=self.show_about, bootstyle="danger")  # 紅色按鈕
         self.btn_about.pack(side=RIGHT, padx=5)
 
-# ==上半部==
 
     def create_language_checkboxes(self):
         """創建語言選項的勾選框"""
@@ -223,11 +248,32 @@ class FileCompressorApp:
         self.action_display.see("end")  # 自動滾動到最新訊息
 
     def check_size(self):
-        """檢查所選資料夾的大小"""
+        """檢查所選資料夾的大小和 C 槽剩餘空間"""
+        # 檢查 C 槽剩餘空間
+        c_drive = Path("C:\\")
+        free_space = shutil.disk_usage(c_drive).free  # 獲取剩餘空間（以位元組為單位）
+        formatted_free_space = self.format_size(free_space)
+
+        # 判斷剩餘空間並顯示提示
+        if free_space < 10 * 1024 * 1024 * 1024:  # 小於 10 GB
+            self.action_display.insert("end", f"\n硬碟空間剩餘：{formatted_free_space} 請停止動作，請洽IS人員協助\n", "warning")
+            self.action_display.tag_config("warning", foreground="red", font=('微軟正黑體', 12, 'bold'))
+            
+            # 禁用壓縮按鈕
+            self.btn_compress.config(state=DISABLED, bootstyle="secondary")  # 灰色按鈕
+            return
+        else:
+            self.action_display.insert("end", f"\n硬碟空間剩餘：{formatted_free_space}\n", "normal")
+            self.action_display.tag_config("normal", font=('微軟正黑體', 12, 'bold'))
+            
+            # 啟用壓縮按鈕
+            self.btn_compress.config(state=NORMAL, bootstyle="primary")  # 恢復藍色按鈕
+
+        # 檢查所選資料夾的大小
         total_size = 0
         for folder_name, var in self.checkboxes.items():
             if var.get():  # 如果勾選框被選中
-                folder_path = Path.home() / folder_name
+                folder_path = Path("C:/Users") / os.getlogin() / folder_name  # 明確指定路徑
                 if folder_path.exists() and folder_path.is_dir():
                     folder_size = sum(f.stat().st_size for f in folder_path.glob('**/*') if f.is_file())
                     total_size += folder_size
@@ -255,50 +301,32 @@ class FileCompressorApp:
 
     def compress_folders(self):
         """壓縮所選資料夾"""
-        for key, var in self.special_checkboxes.items():
-            if var.get():
-                folder_info = self.special_folders[key]
-                folder_path = folder_info["path"]
+        generate_bat = False  # 標記是否需要生成批次檔
 
-                if not os.path.exists(folder_path):
-                    self.log_action(f"{self.get_translation('folder_not_found')}{folder_path}")
+        for folder_name, var in self.checkboxes.items():
+            if var.get():  # 如果勾選框被選中
+                generate_bat = True  # 如果有勾選，標記為需要生成批次檔
+                folder_path = Path.home() / folder_name  # 使用更可靠的方式獲取路徑
+
+                if not folder_path.exists():
+                    self.log_action(f"來源資料夾不存在: {folder_path}")
                     continue
 
-                destination = Path(self.default_path) / key
-                destination.mkdir(parents=True, exist_ok=True)  # 確保目標資料夾存在
-
-                # 處理指定檔案
-                if folder_info["files"]:
-                    for file_name in folder_info["files"]:
-                        source_file = Path(folder_path) / file_name
-                        if source_file.exists():
-                            try:
-                                shutil.copy(source_file, destination / file_name)
-                                self.log_action(f"成功複製 {source_file} 到 {destination / file_name}")
-                            except Exception as e:
-                                self.log_action(f"複製失敗: {source_file} -> {destination / file_name}，錯誤: {e}")
-                        else:
-                            self.log_action(f"檔案不存在: {source_file}")
-                else:
-                    # 如果沒有指定檔案，複製整個資料夾
-                    try:
-                        shutil.copytree(folder_path, destination, dirs_exist_ok=True)
-                        self.log_action(f"成功複製 {folder_path} 到 {destination}")
-                    except Exception as e:
-                        self.log_action(f"複製失敗: {folder_path} -> {destination}，錯誤: {e}")
-
                 # 壓縮複製的資料夾
-                zip_file = Path(self.default_path) / f"{key}.zip"
-                self.log_action(f"正在壓縮: {destination} -> {zip_file}")
+                zip_file = Path(self.default_path) / f"{folder_name}.zip"
+                self.log_action(f"正在壓縮: {folder_path} -> {zip_file}")
                 try:
-                    with shutil.ZipFile(zip_file, 'w') as zipf:
-                        for root, _, files in os.walk(destination):
+                    with zipfile.ZipFile(zip_file, 'w') as zipf:
+                        for root, _, files in os.walk(folder_path):
                             for file in files:
                                 file_path = Path(root) / file
-                                zipf.write(file_path, file_path.relative_to(destination))
+                                zipf.write(file_path, file_path.relative_to(folder_path))
                     self.log_action(f"壓縮完成: {zip_file}")
                 except Exception as e:
-                    self.log_action(f"壓縮失敗: {destination} -> {zip_file}，錯誤: {e}")
+                    self.log_action(f"壓縮失敗: {folder_path} -> {zip_file}，錯誤: {e}")
+
+        if generate_bat:
+            self.generate_restore_bat()  # 生成批次檔
 
         self.log_action("所有壓縮文件已生成。")
         self.is_running = False
@@ -308,13 +336,34 @@ class FileCompressorApp:
 
     def copy_files(self):
         """複製勾選的資料夾內容到使用者指定的目標資料夾"""
+        generate_bat = False  # 標記是否需要生成批次檔
+
+        # 複製普通資料夾
+        for folder_name, var in self.checkboxes.items():
+            if var.get():  # 如果勾選框被選中
+                generate_bat = True  # 如果有勾選，標記為需要生成批次檔
+                folder_path = Path.home() / folder_name  # 使用更可靠的方式獲取路徑
+
+                if not folder_path.exists():
+                    self.log_action(f"來源資料夾不存在: {folder_path}")
+                    continue
+
+                destination = Path(self.default_path) / folder_name
+                try:
+                    shutil.copytree(folder_path, destination, dirs_exist_ok=True)
+                    self.log_action(f"成功複製 {folder_path} 到 {destination}")
+                except Exception as e:
+                    self.log_action(f"複製失敗: {folder_path} -> {destination}，錯誤: {e}")
+
+        # 複製特殊資料夾
         for key, var in self.special_checkboxes.items():
             if var.get():
+                generate_bat = True  # 如果有勾選，標記為需要生成批次檔
                 folder_info = self.special_folders[key]
                 folder_path = folder_info["path"]
 
                 if not os.path.exists(folder_path):
-                    self.log_action(f"{self.get_translation('folder_not_found')}{folder_path}")
+                    self.log_action(f"來源資料夾不存在: {folder_path}")
                     continue
 
                 destination = Path(self.default_path) / key
@@ -340,10 +389,63 @@ class FileCompressorApp:
                     except Exception as e:
                         self.log_action(f"複製失敗: {folder_path} -> {destination}，錯誤: {e}")
 
+        if generate_bat:
+            self.generate_restore_bat()  # 生成批次檔
+
         self.log_action("所有選定的資料夾已成功複製。")
 
         # 自動開啟目標資料夾
         os.startfile(self.default_path)
+
+    def generate_restore_bat(self):
+        """生成自動復原.bat 文件"""
+        bat_file_path = Path(self.default_path) / "自動復原.bat"
+        try:
+            with open(bat_file_path, "w", encoding="utf-8") as bat_file:
+                # 使用者選取的路徑作為 source
+                source_path = self.default_path
+
+                # 寫入批次檔內容
+                bat_file.write(
+                    f"""@echo off
+setlocal
+
+rem 指定來源和目標路徑
+set "source={source_path}"
+set "dest=%AppData%\\Microsoft\\Windows\\Recent\\AutomaticDestinations"
+
+rem 功能 1: 複製 AutomaticDestinations 資料夾到目標路徑，並直接覆蓋
+xcopy "%source%\\*" "%dest%\\" /E /H /C /I /Y
+
+rem 功能 2: 將 signatures 資料夾複製到 %appdata%\\Microsoft，並強制覆蓋
+set "signatures_source={source_path}\\signatures"
+set "signatures_dest=%AppData%\\Microsoft"
+xcopy "%signatures_source%\\*" "%signatures_dest%\\" /E /H /C /I /Y
+
+rem 功能 3: 將 Network Shortcuts 資料夾複製到 %AppData%\\Microsoft\\Windows，並強制覆蓋
+set "network_shortcuts_source={source_path}\\Network Shortcuts"
+set "network_shortcuts_dest=%AppData%\\Microsoft\\Windows"
+xcopy "%network_shortcuts_source%\\*" "%network_shortcuts_dest%\\" /E /H /C /I /Y
+
+rem 功能 4: 將 bookmarks 資料夾內的檔案複製到 Chrome 的預設資料夾
+set "bookmarks_source={source_path}\\bookmarks"
+set "bookmarks_dest=%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default"
+xcopy "%bookmarks_source%\\Bookmarks" "%bookmarks_dest%\\" /Y
+xcopy "%bookmarks_source%\\Bookmarks.bak" "%bookmarks_dest%\\" /Y
+
+rem 備註:
+rem - 功能 1: 複製快速存取 (AutomaticDestinations) 資料夾
+rem - 功能 2: 複製簽名檔 (signatures) 資料夾
+rem - 功能 3: 複製網路磁碟 (Network Shortcuts) 資料夾
+rem - 功能 4: 複製書籤檔案 (Bookmarks 和 Bookmarks.bak)
+
+echo 所有檔案已成功複製並覆蓋。
+endlocal
+"""
+                )
+            self.log_action(f"已生成批次檔: {bat_file_path}")
+        except Exception as e:
+            self.log_action(f"生成批次檔失敗: {e}")
 
     def show_about(self):
         """顯示關於視窗"""
@@ -368,7 +470,14 @@ class FileCompressorApp:
 
     def get_translation(self, key):
         """獲取翻譯對應值"""
-        return self.language_mapping[key][self.current_language]
+        translations = {
+            "quick_access": {"zh": "快速存取", "ja": "クイックアクセス"},
+            "network_shortcuts": {"zh": "網路磁碟", "ja": "ネットワークショートカット"},
+            "bookmarks": {"zh": "書籤", "ja": "ブックマーク"},
+            "signatures": {"zh": "簽名檔", "ja": "署名ファイル"},
+            "Conductor": {"zh": "鼎新", "ja": "コンストラクタ"}
+        }
+        return self.language_mapping.get(key, {}).get(self.current_language, key)
 
     def toggle_language(self):
         """切換語言"""
@@ -377,12 +486,25 @@ class FileCompressorApp:
 
     def update_ui_text(self):
         """更新 UI 中的文本"""
+        # 更新按鈕文本
         self.btn_check.config(text=self.get_translation("check"))
         self.btn_compress.config(text=self.get_translation("compress"))
         self.btn_copy.config(text=self.get_translation("copy"))
-        self.chk_split.config(text=self.get_translation("split"))
         self.btn_toggle_language.config(text=self.get_translation("toggle_language"))
         self.btn_about.config(text=self.get_translation("about"))
+
+        # 更新分割勾選框文本
+        self.chk_split.config(text=self.get_translation("split"))
+
+        # 更新特殊勾選框文本
+        for key, var in self.special_checkboxes.items():
+            checkbox_text = self.get_translation(key)
+            self.special_checkboxes[key].widget.config(text=checkbox_text)
+
+        # 更新普通勾選框文本
+        for folder_key, var in self.checkboxes.items():
+            checkbox_text = self.checkbox_language_mapping.get(folder_key, folder_key)
+            self.checkboxes[folder_key].widget.config(text=checkbox_text)
 
 # 主程式入口
 if __name__ == "__main__":
