@@ -47,15 +47,48 @@ class FileCompressorApp:
     def __init__(self, root):
         self.root = root
 
+        # 設定程式標題
+        self.root.title("QuickPack1.0")  # 修改程式顯示名稱
+
+        # 預設存檔路徑
+        self.default_path = Path("Z:\\")  # 指定到 Z 槽
+
         # 初始化語言
         self.current_language = "zh"  # 預設語言
         self.detect_language()  # 自動檢測系統語言
 
-        # 提示框控制變數
-        self.tooltip_font_size = 10  # 提示框字體大小
-        self.tooltip_text_color = "black"  # 提示框文字顏色
+        # 初始化變數
+        self.is_running = False  # 壓縮執行狀態
+        self.worker_thread = None  # 壓縮執行緒
+        self.special_checkboxes = {}  # 初始化特殊勾選框變數
 
-        # 多語言支持映射
+        # 初始化普通勾選框的語言對映
+        self.checkbox_language_mapping = {
+            "Desktop": "Desktop",
+            "Documents": "Documents",
+            "Downloads": "Downloads",
+            "Pictures": "Pictures",
+            "Favorites": "Favorites"  
+        }
+
+        # 初始化 special_folders
+        self.special_folders = {
+            "quick_access": {
+                "path": os.getenv("APPDATA") + r"\Microsoft\Windows\Recent\AutomaticDestinations",
+                "files": None
+            },
+            "network_shortcuts": {
+                "path": os.getenv("APPDATA") + r"\Microsoft\Windows\Network Shortcuts",
+                "files": None
+            },
+            "bookmarks": {
+                "path": os.getenv("LOCALAPPDATA") + r"\Google\Chrome\User Data\Default",
+                "files": ["Bookmarks", "Bookmarks.bak"]
+            },
+            "signatures": {"path": os.getenv("APPDATA") + r"\Microsoft\Signatures", "files": None}
+        }
+
+        # 初始化 language_mapping
         self.language_mapping = {
             "app_title": {"zh": "QuickPack v1.0", "ja": "QuickPack v1.0"},
             "check": {"zh": "檢查", "ja": "チェック"},
@@ -73,46 +106,9 @@ class FileCompressorApp:
             "contact": {"zh": "透過信箱聯絡我們(請點擊)", "ja": "メールでお問い合わせください（クリックしてください）"},
             "bookmarks": {"zh": "書籤", "ja": "ブックマーク"},
             "signatures": {"zh": "簽名檔", "ja": "署名ファイル"},
-            "Conductor": {"zh": "鼎新", "ja": "コンストラクタ"},
             "quick_access": {"zh": "快速存取", "ja": "クイックアクセス"},
             "network_shortcuts": {"zh": "網路磁碟", "ja": "ネットワークショートカット"}
         }
-
-        # 勾選框對應的資料夾名稱
-        self.checkbox_language_mapping = {
-            "Desktop": "Desktop",
-            "Downloads": "Downloads",
-            "Documents": "Documents",
-            "Pictures": "Pictures",
-            "Favorites": "Favorites",
-        }
-
-        # 新增的特殊勾選框
-        self.special_folders = {
-            "quick_access": {
-                "path": os.getenv("APPDATA") + r"\Microsoft\Windows\Recent\AutomaticDestinations",
-                "files": None
-            },
-            "network_shortcuts": {
-                "path": os.getenv("APPDATA") + r"\Microsoft\Windows\Network Shortcuts",
-                "files": None
-            },
-            "bookmarks": {
-                "path": os.getenv("LOCALAPPDATA") + r"\Google\Chrome\User Data\Default",
-                "files": ["Bookmarks", "Bookmarks.bak"]
-            },
-            "signatures": {"path": os.getenv("APPDATA") + r"\Microsoft\Signatures", "files": None},
-            "Conductor": {"path": r"C:\Conductor", "files": None}
-        }
-
-        self.root.title(self.get_translation("app_title"))  # 設定視窗標題
-        self.root.geometry("900x700")  # 調整視窗大小
-        self.style = ttk.Style("superhero")  # 使用 ttkbootstrap 的 "superhero" 主題
-
-        # 初始化變數
-        self.is_running = False  # 壓縮執行狀態
-        self.worker_thread = None  # 壓縮執行緒
-        self.special_checkboxes = {}  # 初始化特殊勾選框變數
 
         # 初始化 UI
         self.create_widgets()
@@ -130,16 +126,16 @@ class FileCompressorApp:
         button_width = 10  # 按鈕寬度
 
         # 檢查按鈕
-        self.btn_check = ttk.Button(button_frame, text=self.get_translation("check"), command=self.check_size, width=button_width, bootstyle="success", style="Custom.TButton")  # 綠色按鈕
+        self.btn_check = ttk.Button(button_frame, text=self.get_translation("check"), command=self.check_size, width=button_width, bootstyle="success", style="Custom.TButton")  
         self.btn_check.pack(side=LEFT, padx=5)
 
-        # 壓縮按鈕
-        self.btn_compress = ttk.Button(button_frame, text=self.get_translation("compress"), command=self.start_compress, width=button_width, bootstyle="primary", style="Custom.TButton")  # 藍色按鈕
-        self.btn_compress.pack(side=LEFT, padx=5)
-
-        # 複製按鈕
-        self.btn_copy = ttk.Button(button_frame, text=self.get_translation("copy"), command=self.copy_files, width=button_width, bootstyle="warning", style="Custom.TButton")  # 黃色按鈕
+        # 複製按鈕（將位置調整到壓縮按鈕之前）
+        self.btn_copy = ttk.Button(button_frame, text=self.get_translation("copy"), command=self.copy_files, width=button_width, bootstyle="warning", style="Custom.TButton")  
         self.btn_copy.pack(side=LEFT, padx=5)
+
+        # 壓縮按鈕（大小與檢查按鈕相同，位置調整到複製按鈕之後）
+        self.btn_compress = ttk.Button(button_frame, text=self.get_translation("compress"), command=self.start_compress, width=button_width, bootstyle="primary", style="Custom.TButton")  
+        self.btn_compress.pack(side=LEFT, padx=5)
 
         # 語言切換按鈕
         self.btn_toggle_language = ttk.Button(button_frame, text=self.get_translation("toggle_language"), command=self.toggle_language, bootstyle="danger", style="Custom.TButton")  # 紅色按鈕
@@ -168,7 +164,7 @@ class FileCompressorApp:
         self.info_display_width = 40  # 信息框寬度
 
          # 預設存檔路徑
-        self.default_path = f"Z:\\{Path.home().name}"  # 使用新的預設路徑
+        self.default_path = Path("Z:\\")  # 使用新的預設路徑
 
         # 顯示預設路徑
         self.info_display = ttk.Label(self.info_frame, text=self.default_path, bootstyle="light", font=('微軟正黑體', 14), anchor='w', width=self.info_display_width)
@@ -182,7 +178,7 @@ class FileCompressorApp:
         self.action_display = scrolledtext.ScrolledText(
             self.root, 
             height=15, 
-            width=72,  # 原寬度 90，縮小 1/5
+            width=60,  # 原寬度 90
             bg="#263238", 
             fg="white", 
             font=('微軟正黑體', 12)  # 原文字大小 10，放大 2 個單位
@@ -228,11 +224,20 @@ class FileCompressorApp:
         special_frame = ttk.Frame(self.root)  # 特殊勾選框框架
         special_frame.pack(pady=5, anchor='w')  # 放置在主視窗中，靠左對齊
 
+        # 在 Z 槽下建立一個名為「當前使用者」的資料夾
+        user_folder = Path(self.default_path) / Path.home().name
+        if user_folder.exists() and not user_folder.is_dir():
+            user_folder.unlink()  # 如果是檔案則刪除
+        user_folder.mkdir(parents=True, exist_ok=True)  # 確保資料夾存在
+
         for key, info in self.special_folders.items():
             var = ttk.BooleanVar(value=True)  # 預設為勾選
             self.special_checkboxes[key] = var
             chk = ttk.Checkbutton(special_frame, text=self.get_translation(key), variable=var, bootstyle="info")
             chk.pack(side=LEFT, padx=5)  # 水平排列，間距為 5
+
+            # 更新特殊資料夾的目標路徑到「當前使用者」資料夾內
+            info["destination"] = user_folder / key
 
     def choose_save_location(self):
         """選擇存檔位置"""
@@ -303,31 +308,47 @@ class FileCompressorApp:
         """壓縮所選資料夾"""
         generate_bat = False  # 標記是否需要生成批次檔
 
-        for folder_name, var in self.checkboxes.items():
-            if var.get():  # 如果勾選框被選中
-                generate_bat = True  # 如果有勾選，標記為需要生成批次檔
-                folder_path = Path.home() / folder_name  # 使用更可靠的方式獲取路徑
+        # 統計要壓縮的資料夾數量
+        compress_targets = [folder_name for folder_name, var in self.checkboxes.items() if var.get()]
+        total_targets = len(compress_targets)
+        if total_targets == 0:
+            self.log_action("未選擇任何資料夾進行壓縮。")
+            return
 
-                if not folder_path.exists():
-                    self.log_action(f"來源資料夾不存在: {folder_path}")
-                    continue
+        self.progress_bar["maximum"] = 10
+        self.progress_bar["value"] = 0
 
-                # 壓縮複製的資料夾
-                zip_file = Path(self.default_path) / f"{folder_name}.zip"
-                self.log_action(f"正在壓縮: {folder_path} -> {zip_file}")
-                try:
-                    with zipfile.ZipFile(zip_file, 'w') as zipf:
-                        for root, _, files in os.walk(folder_path):
-                            for file in files:
-                                file_path = Path(root) / file
-                                zipf.write(file_path, file_path.relative_to(folder_path))
-                    self.log_action(f"壓縮完成: {zip_file}")
-                except Exception as e:
-                    self.log_action(f"壓縮失敗: {folder_path} -> {zip_file}，錯誤: {e}")
+        for idx, folder_name in enumerate(compress_targets, 1):
+            generate_bat = True
+            folder_path = Path.home() / folder_name
+
+            if not folder_path.exists():
+                self.log_action(f"來源資料夾不存在: {folder_path}")
+                continue
+
+            zip_file = Path(self.default_path) / f"{folder_name}.zip"
+            self.log_action(f"正在壓縮: {folder_path} -> {zip_file}")
+            try:
+                with zipfile.ZipFile(zip_file, 'w') as zipf:
+                    for root, _, files in os.walk(folder_path):
+                        for file in files:
+                            file_path = Path(root) / file
+                            zipf.write(file_path, file_path.relative_to(folder_path))
+                self.log_action(f"壓縮完成: {zip_file}")
+            except Exception as e:
+                self.log_action(f"壓縮失敗: {folder_path} -> {zip_file}，錯誤: {e}")
+
+            # 進度條推進
+            percent = int(idx / total_targets * 10)
+            self.progress_bar["value"] = percent
+            self.progress_label.config(text=f"進度: {percent * 10}%")
+            self.root.update_idletasks()
 
         if generate_bat:
             self.generate_restore_bat()  # 生成批次檔
 
+        self.progress_bar["value"] = 10
+        self.progress_label.config(text="進度: 100%")
         self.log_action("所有壓縮文件已生成。")
         self.is_running = False
 
@@ -336,132 +357,126 @@ class FileCompressorApp:
 
     def copy_files(self):
         """複製勾選的資料夾內容到使用者指定的目標資料夾"""
-        generate_bat = False  # 標記是否需要生成批次檔
+        import time
+
+        generate_bat = False
+        total_files = 0
+        copied_files = 0
+        total_size = 0
+
+        # 計算普通資料夾檔案數量與容量
+        for folder_name, var in self.checkboxes.items():
+            if var.get():
+                folder_path = Path.home() / folder_name
+                if folder_path.exists():
+                    files = [f for f in folder_path.glob('**/*') if f.is_file()]
+                    folder_size = sum(f.stat().st_size for f in files)
+                    total_files += len(files)
+                    total_size += folder_size
+
+        # 計算特殊資料夾檔案數量與容量，並顯示於日誌
+        for key, var in self.special_checkboxes.items():
+            if var.get():
+                generate_bat = True
+                folder_info = self.special_folders[key]
+                folder_path = Path(folder_info["path"])
+                if folder_path.exists():
+                    files = [f for f in folder_path.glob('**/*') if f.is_file()]
+                    folder_size = sum(f.stat().st_size for f in files)
+                    self.log_action(f"{self.get_translation(key)}：檔案數量 {len(files)}，容量 {self.format_size(folder_size)}")
+                    total_files += len(files)
+                    total_size += folder_size
+                else:
+                    self.log_action(f"{self.get_translation('folder_not_found')}{folder_path}")
+
+        self.log_action(f"特殊資料夾總容量：{self.format_size(total_size)}，總檔案數量：{total_files}")
+        self.log_action("5秒後開始複製...")
+        self.root.update_idletasks()
+        time.sleep(5)
+
+        # 暫停進度條功能
+        # self.progress_bar["maximum"] = 10
+        # self.progress_bar["value"] = 0
+        # progress_unit = max(1, total_files // 10)
+        # progress_count = 0
 
         # 複製普通資料夾
         for folder_name, var in self.checkboxes.items():
-            if var.get():  # 如果勾選框被選中
-                generate_bat = True  # 如果有勾選，標記為需要生成批次檔
-                folder_path = Path.home() / folder_name  # 使用更可靠的方式獲取路徑
-
-                if not folder_path.exists():
-                    self.log_action(f"來源資料夾不存在: {folder_path}")
-                    continue
-
-                destination = Path(self.default_path) / folder_name
-                try:
-                    shutil.copytree(folder_path, destination, dirs_exist_ok=True)
-                    self.log_action(f"成功複製 {folder_path} 到 {destination}")
-                except Exception as e:
-                    self.log_action(f"複製失敗: {folder_path} -> {destination}，錯誤: {e}")
+            if var.get():
+                folder_path = Path.home() / folder_name
+                destination = Path(self.default_path) / os.getlogin() / folder_name
+                destination.mkdir(parents=True, exist_ok=True)
+                if folder_path.exists():
+                    for file in folder_path.glob('**/*'):
+                        if file.is_file():
+                            try:
+                                shutil.copy(file, destination / file.name)
+                                copied_files += 1
+                            except PermissionError:
+                                self.log_action(f"無法訪問檔案（權限被拒絕）: {file}")
+                            except Exception as e:
+                                self.log_action(f"複製檔案失敗: {file}，錯誤: {e}")
 
         # 複製特殊資料夾
         for key, var in self.special_checkboxes.items():
             if var.get():
-                generate_bat = True  # 如果有勾選，標記為需要生成批次檔
                 folder_info = self.special_folders[key]
-                folder_path = folder_info["path"]
-
-                if not os.path.exists(folder_path):
-                    self.log_action(f"來源資料夾不存在: {folder_path}")
-                    continue
-
-                destination = Path(self.default_path) / key
-                destination.mkdir(parents=True, exist_ok=True)  # 確保目標資料夾存在
-
-                # 處理指定檔案
-                if folder_info["files"]:
-                    for file_name in folder_info["files"]:
-                        source_file = Path(folder_path) / file_name
-                        if source_file.exists():
+                folder_path = Path(folder_info["path"])
+                destination = Path(self.default_path) / os.getlogin() / key
+                destination.mkdir(parents=True, exist_ok=True)
+                if folder_path.exists():
+                    for file in folder_path.glob('**/*'):
+                        if file.is_file():
                             try:
-                                shutil.copy(source_file, destination / file_name)
-                                self.log_action(f"成功複製 {source_file} 到 {destination / file_name}")
+                                shutil.copy(file, destination / file.name)
+                                copied_files += 1
+                            except PermissionError:
+                                self.log_action(f"無法訪問檔案（權限被拒絕）: {file}")
+                            except FileNotFoundError:
+                                self.log_action(f"檔案不存在: {file}")
                             except Exception as e:
-                                self.log_action(f"複製失敗: {source_file} -> {destination / file_name}，錯誤: {e}")
-                        else:
-                            self.log_action(f"檔案不存在: {source_file}")
+                                self.log_action(f"複製檔案失敗: {file}，錯誤: {e}")
                 else:
-                    # 如果沒有指定檔案，複製整個資料夾
-                    try:
-                        shutil.copytree(folder_path, destination, dirs_exist_ok=True)
-                        self.log_action(f"成功複製 {folder_path} 到 {destination}")
-                    except Exception as e:
-                        self.log_action(f"複製失敗: {folder_path} -> {destination}，錯誤: {e}")
+                    self.log_action(f"來源資料夾不存在: {folder_path}")
 
-        if generate_bat:
-            self.generate_restore_bat()  # 生成批次檔
-
+        # self.progress_bar["value"] = 10
+        # self.progress_label.config(text="進度: 100%")
         self.log_action("所有選定的資料夾已成功複製。")
 
-        # 自動開啟目標資料夾
-        os.startfile(self.default_path)
+        if generate_bat:
+            self.generate_restore_bat()
 
     def generate_restore_bat(self):
         """生成自動復原.bat 文件"""
-        bat_file_path = Path(self.default_path) / "自動復原.bat"
+        # 獲取使用者帳號名稱
+        user_folder_name = os.getlogin()
+        user_folder_path = Path(self.default_path) / user_folder_name
+        user_folder_path.mkdir(parents=True, exist_ok=True)  # 確保使用者資料夾存在
+
+        # 將批次檔放入使用者資料夾內
+        bat_file_path = user_folder_path / "自動復原.bat"
         try:
-            with open(bat_file_path, "w", encoding="utf-8") as bat_file:
-                # 使用者選取的路徑作為 source
-                source_path = self.default_path
-
-                # 寫入批次檔內容
+            # 使用 UTF-8 with BOM 編碼寫入批次檔
+            with open(bat_file_path, "w", encoding="utf-8-sig") as bat_file:
                 bat_file.write(
-                    f"""@echo off
-setlocal
+                    """@echo off
 
-rem 指定來源資料夾
-set "source=%~dp0"
+REM 1. 複製 Bookmarks 和 Bookmarks.bak
+xcopy /Y /Q "%~dp0Bookmarks\\Bookmarks" "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\"
+xcopy /Y /Q "%~dp0Bookmarks\\Bookmarks.bak" "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\"
 
-rem 功能 1: 將 Bookmarks 資料夾內的檔案複製到 Chrome 的預設資料夾，並強制覆蓋
-set "bookmarks_source=%source%Bookmarks"
-set "bookmarks_dest=%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default"
-if exist "%bookmarks_source%" (
-    echo 正在複製 Bookmarks 到 %bookmarks_dest%...
-    xcopy "%bookmarks_source%\\Bookmarks" "%bookmarks_dest%\\" /Y
-    xcopy "%bookmarks_source%\\Bookmarks.bak" "%bookmarks_dest%\\" /Y
-    echo Bookmarks 複製完成。
-) else (
-    echo Bookmarks 資料夾不存在，跳過此步驟。
-)
+REM 2. 複製 Signatures 資料夾內所有檔案
+xcopy /Y /Q "%~dp0Signatures\\*" "%AppData%\\Microsoft\\Signatures\\"
 
-rem 功能 2: 將 Signatures 資料夾複製到 %appdata%\\Microsoft，並強制覆蓋
-set "signatures_source=%source%Signatures"
-set "signatures_dest=%AppData%\\Microsoft"
-if exist "%signatures_source%" (
-    echo 正在複製 Signatures 到 %signatures_dest%...
-    xcopy "%signatures_source%\\*" "%signatures_dest%\\" /E /H /C /I /Y
-    echo Signatures 複製完成。
-) else (
-    echo Signatures 資料夾不存在，跳過此步驟。
-)
+REM 3. 複製 quick_access 資料夾內所有檔案
+xcopy /Y /Q "%~dp0quick_access\\*" "%AppData%\\Microsoft\\Windows\\Recent\\AutomaticDestinations\\"
 
-rem 功能 3: 將 AutomaticDestinations 資料夾複製到 %AppData%\\Microsoft\\Windows\\Recent，並強制覆蓋
-set "automatic_destinations_source=%source%AutomaticDestinations"
-set "automatic_destinations_dest=%AppData%\\Microsoft\\Windows\\Recent"
-if exist "%automatic_destinations_source%" (
-    echo 正在複製 AutomaticDestinations 到 %automatic_destinations_dest%...
-    xcopy "%automatic_destinations_source%\\*" "%automatic_destinations_dest%\\" /E /H /C /I /Y
-    echo AutomaticDestinations 複製完成。
-) else (
-    echo AutomaticDestinations 資料夾不存在，跳過此步驟。
-)
+REM 4. 複製 Network Shortcuts 資料夾內所有檔案
+xcopy /Y /Q "%~dp0network_shortcuts\\*" "%AppData%\\Microsoft\\Windows\\Network Shortcuts\\"
 
-rem 功能 4: 將 Network Shortcuts 資料夾複製到 %AppData%\\Microsoft\\Windows，並強制覆蓋
-set "network_shortcuts_source=%source%Network Shortcuts"
-set "network_shortcuts_dest=%AppData%\\Microsoft\\Windows"
-if exist "%network_shortcuts_source%" (
-    echo 正在複製 Network Shortcuts 到 %network_shortcuts_dest%...
-    xcopy "%network_shortcuts_source%\\*" "%network_shortcuts_dest%\\" /E /H /C /I /Y
-    echo Network Shortcuts 複製完成。
-) else (
-    echo Network Shortcuts 資料夾不存在，跳過此步驟。
-)
-
-echo 所有檔案已成功複製並覆蓋。
-endlocal
-pause
-"""
+REM 等待5秒後自動關閉
+timeout /t 5 >nul
+exit"""
                 )
             self.log_action(f"已生成批次檔: {bat_file_path}")
         except Exception as e:
@@ -490,13 +505,6 @@ pause
 
     def get_translation(self, key):
         """獲取翻譯對應值"""
-        translations = {
-            "quick_access": {"zh": "快速存取", "ja": "クイックアクセス"},
-            "network_shortcuts": {"zh": "網路磁碟", "ja": "ネットワークショートカット"},
-            "bookmarks": {"zh": "書籤", "ja": "ブックマーク"},
-            "signatures": {"zh": "簽名檔", "ja": "署名ファイル"},
-            "Conductor": {"zh": "鼎新", "ja": "コンストラクタ"}
-        }
         return self.language_mapping.get(key, {}).get(self.current_language, key)
 
     def toggle_language(self):

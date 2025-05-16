@@ -106,7 +106,7 @@ class FileCompressorApp:
         }
 
         self.root.title(self.get_translation("app_title"))  # 設定視窗標題
-        self.root.geometry("900x700")  # 調整視窗大小
+        self.root.geometry("700x600")  # 調整視窗大小
         self.style = ttk.Style("superhero")  # 使用 ttkbootstrap 的 "superhero" 主題
 
         # 初始化變數
@@ -130,16 +130,16 @@ class FileCompressorApp:
         button_width = 10  # 按鈕寬度
 
         # 檢查按鈕
-        self.btn_check = ttk.Button(button_frame, text=self.get_translation("check"), command=self.check_size, width=button_width, bootstyle="success", style="Custom.TButton")  # 綠色按鈕
+        self.btn_check = ttk.Button(button_frame, text=self.get_translation("check"), command=self.check_size, width=button_width, bootstyle="success", style="Custom.TButton")  
         self.btn_check.pack(side=LEFT, padx=5)
 
-        # 壓縮按鈕
-        self.btn_compress = ttk.Button(button_frame, text=self.get_translation("compress"), command=self.start_compress, width=button_width, bootstyle="primary", style="Custom.TButton")  # 藍色按鈕
-        self.btn_compress.pack(side=LEFT, padx=5)
-
-        # 複製按鈕
-        self.btn_copy = ttk.Button(button_frame, text=self.get_translation("copy"), command=self.copy_files, width=button_width, bootstyle="warning", style="Custom.TButton")  # 黃色按鈕
+        # 複製按鈕（將位置調整到壓縮按鈕之前）
+        self.btn_copy = ttk.Button(button_frame, text=self.get_translation("copy"), command=self.copy_files, width=button_width, bootstyle="warning", style="Custom.TButton")  
         self.btn_copy.pack(side=LEFT, padx=5)
+
+        # 壓縮按鈕（大小與檢查按鈕相同，位置調整到複製按鈕之後）
+        self.btn_compress = ttk.Button(button_frame, text=self.get_translation("compress"), command=self.start_compress, width=button_width, bootstyle="primary", style="Custom.TButton")  
+        self.btn_compress.pack(side=LEFT, padx=5)
 
         # 語言切換按鈕
         self.btn_toggle_language = ttk.Button(button_frame, text=self.get_translation("toggle_language"), command=self.toggle_language, bootstyle="danger", style="Custom.TButton")  # 紅色按鈕
@@ -182,7 +182,7 @@ class FileCompressorApp:
         self.action_display = scrolledtext.ScrolledText(
             self.root, 
             height=15, 
-            width=72,  # 原寬度 90，縮小 1/5
+            width=60,  # 原寬度 90
             bg="#263238", 
             fg="white", 
             font=('微軟正黑體', 12)  # 原文字大小 10，放大 2 個單位
@@ -410,37 +410,57 @@ class FileCompressorApp:
                     f"""@echo off
 setlocal
 
-rem 指定來源和目標路徑
-set "source={source_path}"
-set "dest=%AppData%\\Microsoft\\Windows\\Recent\\AutomaticDestinations"
+rem 指定來源資料夾
+set "source=%~dp0"
 
-rem 功能 1: 複製 AutomaticDestinations 資料夾到目標路徑，並直接覆蓋
-xcopy "%source%\\*" "%dest%\\" /E /H /C /I /Y
-
-rem 功能 2: 將 signatures 資料夾複製到 %appdata%\\Microsoft，並強制覆蓋
-set "signatures_source={source_path}\\signatures"
-set "signatures_dest=%AppData%\\Microsoft"
-xcopy "%signatures_source%\\*" "%signatures_dest%\\" /E /H /C /I /Y
-
-rem 功能 3: 將 Network Shortcuts 資料夾複製到 %AppData%\\Microsoft\\Windows，並強制覆蓋
-set "network_shortcuts_source={source_path}\\Network Shortcuts"
-set "network_shortcuts_dest=%AppData%\\Microsoft\\Windows"
-xcopy "%network_shortcuts_source%\\*" "%network_shortcuts_dest%\\" /E /H /C /I /Y
-
-rem 功能 4: 將 bookmarks 資料夾內的檔案複製到 Chrome 的預設資料夾
-set "bookmarks_source={source_path}\\bookmarks"
+rem 功能 1: 將 Bookmarks 資料夾內的檔案複製到 Chrome 的預設資料夾，並強制覆蓋
+set "bookmarks_source=%source%Bookmarks"
 set "bookmarks_dest=%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default"
-xcopy "%bookmarks_source%\\Bookmarks" "%bookmarks_dest%\\" /Y
-xcopy "%bookmarks_source%\\Bookmarks.bak" "%bookmarks_dest%\\" /Y
+if exist "%bookmarks_source%" (
+    echo 正在複製 Bookmarks 到 %bookmarks_dest%...
+    xcopy "%bookmarks_source%\\Bookmarks" "%bookmarks_dest%\\" /Y
+    xcopy "%bookmarks_source%\\Bookmarks.bak" "%bookmarks_dest%\\" /Y
+    echo Bookmarks 複製完成。
+) else (
+    echo Bookmarks 資料夾不存在，跳過此步驟。
+)
 
-rem 備註:
-rem - 功能 1: 複製快速存取 (AutomaticDestinations) 資料夾
-rem - 功能 2: 複製簽名檔 (signatures) 資料夾
-rem - 功能 3: 複製網路磁碟 (Network Shortcuts) 資料夾
-rem - 功能 4: 複製書籤檔案 (Bookmarks 和 Bookmarks.bak)
+rem 功能 2: 將 Signatures 資料夾複製到 %appdata%\\Microsoft，並強制覆蓋
+set "signatures_source=%source%Signatures"
+set "signatures_dest=%AppData%\\Microsoft"
+if exist "%signatures_source%" (
+    echo 正在複製 Signatures 到 %signatures_dest%...
+    xcopy "%signatures_source%\\*" "%signatures_dest%\\" /E /H /C /I /Y
+    echo Signatures 複製完成。
+) else (
+    echo Signatures 資料夾不存在，跳過此步驟。
+)
+
+rem 功能 3: 將 AutomaticDestinations 資料夾複製到 %AppData%\\Microsoft\\Windows\\Recent，並強制覆蓋
+set "automatic_destinations_source=%source%AutomaticDestinations"
+set "automatic_destinations_dest=%AppData%\\Microsoft\\Windows\\Recent"
+if exist "%automatic_destinations_source%" (
+    echo 正在複製 AutomaticDestinations 到 %automatic_destinations_dest%...
+    xcopy "%automatic_destinations_source%\\*" "%automatic_destinations_dest%\\" /E /H /C /I /Y
+    echo AutomaticDestinations 複製完成。
+) else (
+    echo AutomaticDestinations 資料夾不存在，跳過此步驟。
+)
+
+rem 功能 4: 將 Network Shortcuts 資料夾複製到 %AppData%\\Microsoft\\Windows，並強制覆蓋
+set "network_shortcuts_source=%source%Network Shortcuts"
+set "network_shortcuts_dest=%AppData%\\Microsoft\\Windows"
+if exist "%network_shortcuts_source%" (
+    echo 正在複製 Network Shortcuts 到 %network_shortcuts_dest%...
+    xcopy "%network_shortcuts_source%\\*" "%network_shortcuts_dest%\\" /E /H /C /I /Y
+    echo Network Shortcuts 複製完成。
+) else (
+    echo Network Shortcuts 資料夾不存在，跳過此步驟。
+)
 
 echo 所有檔案已成功複製並覆蓋。
 endlocal
+pause
 """
                 )
             self.log_action(f"已生成批次檔: {bat_file_path}")
