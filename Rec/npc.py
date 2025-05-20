@@ -50,7 +50,7 @@ def find_monitor(x, y, monitors):
 class RecorderApp(tb.Window):
     def __init__(self):
         super().__init__(themename="cosmo")
-        self.title("NPC")
+        self.title("NPC_1.0   by Lucien")
         self.geometry("900x500")
         self.resizable(False, False)
         self.recording = False

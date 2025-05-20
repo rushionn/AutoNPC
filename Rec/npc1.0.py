@@ -9,7 +9,6 @@ import subprocess
 import pynput.mouse
 import pyautogui
 import ctypes
-from screeninfo import get_monitors
 
 # Windows API 結構定義（只定義一次）
 class MOUSEINPUT(ctypes.Structure):
@@ -32,25 +31,10 @@ MOUSE_SAMPLE_INTERVAL = 0.01  # 10ms
 def format_time(ts):
     return datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
 
-def get_monitor_info():
-    monitors = get_monitors()
-    return [{
-        'x': m.x,
-        'y': m.y,
-        'width': m.width,
-        'height': m.height
-    } for m in monitors]
-
-def find_monitor(x, y, monitors):
-    for idx, m in enumerate(monitors):
-        if m['x'] <= x < m['x'] + m['width'] and m['y'] <= y < m['y'] + m['height']:
-            return idx, m
-    return 0, monitors[0]  # fallback
-
 class RecorderApp(tb.Window):
     def __init__(self):
         super().__init__(themename="cosmo")
-        self.title("NPC")
+        self.title("NPC_1.0   by Lucien")
         self.geometry("900x500")
         self.resizable(False, False)
         self.recording = False
@@ -224,17 +208,11 @@ class RecorderApp(tb.Window):
                 now = time.time()
                 pos = mouse_ctrl.position
                 if pos != last_pos:
-                    # 錄製時
-                    monitors = get_monitor_info()
-                    monitor_idx, monitor = find_monitor(pos[0], pos[1], monitors)
-                    rel_x = pos[0] - monitor['x']
-                    rel_y = pos[1] - monitor['y']
                     self._mouse_events.append({
                         'type': 'mouse',
                         'event': 'move',
-                        'monitor': monitor_idx,
-                        'rel_x': rel_x,
-                        'rel_y': rel_y,
+                        'x': pos[0],
+                        'y': pos[1],
                         'time': now
                     })
                     last_pos = pos
@@ -317,23 +295,23 @@ class RecorderApp(tb.Window):
                 break
             base_time = self.events[0]['time']
             play_start = time.time()
-            # 取得目前回放時的螢幕資訊
-            monitors = get_monitor_info()
             while self._current_play_index < total_events:
                 if self.paused:
                     time.sleep(0.05)
                     continue
                 i = self._current_play_index
                 e = self.events[i]
+                # 計算應該執行的目標時間點
                 event_offset = (e['time'] - base_time) / self.speed
                 target_time = play_start + event_offset
+                # 精準等待到該事件時間
                 while True:
                     now = time.time()
                     if now >= target_time:
                         break
                     if self.paused:
                         time.sleep(0.05)
-                        target_time += 0.05
+                        target_time += 0.05  # 修正暫停時的目標時間
                         continue
                     time.sleep(min(0.01, target_time - now))
                 # 執行事件
@@ -345,122 +323,214 @@ class RecorderApp(tb.Window):
                     self.log(f"[{format_time(e['time'])}] 鍵盤: {e['event']} {e['name']}")
                 elif e['type'] == 'mouse':
                     if e.get('event') == 'move':
-                        # 依據錄製時的螢幕與相對座標，還原絕對座標
-                        monitor = monitors[e['monitor']]
-                        abs_x = monitor['x'] + e['rel_x']
-                        abs_y = monitor['y'] + e['rel_y']
-                        move_mouse_abs(abs_x, abs_y)
+                        move_mouse_abs(e['x'], e['y'])
                     elif e.get('event') == 'down':
                         mouse_event_win('down', button=e.get('button', 'left'))
                         self.log(f"[{format_time(e['time'])}] 滑鼠: {e}")
                     elif e.get('event') == 'up':
                         mouse_event_win('up', button=e.get('button', 'left'))
                         self.log(f"[{format_time(e['time'])}] 滑鼠: {e}")
+                    elif e.get('event') == 'wheel':
+                        mouse_event_win('wheel', delta=e.get('delta', 0))
+                        self.log(f"[{format_time(e['time'])}] 滑鼠: {e}")
                 self._current_play_index += 1
         self.playing = False
+        self.paused = False
         self.log(f"[{format_time(time.time())}] 回放結束。")
 
-    def refresh_script_list(self):
-        try:
-            scripts = [f for f in os.listdir(SCRIPTS_DIR) if f.endswith('.json')]
-            self.script_combo['values'] = scripts
-            self.script_combo.current(0)
-        except Exception as e:
-            self.log(f"載入腳本列表時發生錯誤: {e}")
+    # 日誌與事件模組化
+    def get_events_json(self):
+        return json.dumps(self.events, ensure_ascii=False, indent=2)
 
-    def on_script_selected(self, event):
-        script_name = self.script_var.get()
-        if script_name:
-            self.load_script_file(os.path.join(SCRIPTS_DIR, script_name))
-
-    def load_last_script(self):
+    def set_events_json(self, json_str):
         try:
-            with open(LAST_SCRIPT_FILE, 'r', encoding='utf-8') as f:
-                script_name = f.read().strip()
-                if script_name:
-                    self.script_var.set(script_name)
-                    self.load_script_file(os.path.join(SCRIPTS_DIR, script_name))
+            self.events = json.loads(json_str)
+            self.log(f"[{format_time(time.time())}] 已從 JSON 載入 {len(self.events)} 筆事件。")
         except Exception as e:
-            self.log(f"載入最後腳本時發生錯誤: {e}")
-
-    def load_script_file(self, file_path):
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                self.events = json.load(f)
-            self.log(f"載入腳本檔案: {file_path}，事件數量: {len(self.events)}")
-        except Exception as e:
-            self.log(f"載入腳本檔案時發生錯誤: {e}")
+            self.log(f"[{format_time(time.time())}] JSON 載入失敗: {e}")
 
     def auto_save_script(self):
-        if not self.recording and not self.playing:
-            try:
-                script_name = self.script_var.get()
-                if not script_name:
-                    self.log("無法自動儲存腳本，因為腳本名稱為空。")
-                    return
-                file_path = os.path.join(SCRIPTS_DIR, script_name)
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(self.events, f, ensure_ascii=False, indent=2)
-                with open(LAST_SCRIPT_FILE, 'w', encoding='utf-8') as f:
-                    f.write(script_name)
-                self.log(f"自動儲存腳本至: {file_path}")
-            except Exception as e:
-                self.log(f"自動儲存腳本時發生錯誤: {e}")
-
-    def open_scripts_dir(self):
         try:
-            subprocess.Popen(f'explorer "{os.path.abspath(SCRIPTS_DIR)}"')
-        except Exception as e:
-            self.log(f"開啟腳本資料夾時發生錯誤: {e}")
-
-    def rename_script(self):
-        try:
-            old_name = self.script_var.get()
-            new_name = self.rename_var.get().strip()
-            if not old_name or not new_name:
-                return
-            old_path = os.path.join(SCRIPTS_DIR, old_name)
-            new_path = os.path.join(SCRIPTS_DIR, new_name)
-            os.rename(old_path, new_path)
-            self.log(f"腳本檔案重新命名為: {new_name}")
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"record_{ts}.json"
+            path = os.path.join(SCRIPTS_DIR, filename)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.events, f, ensure_ascii=False, indent=2)
+            self.log(f"[{format_time(time.time())}] 自動存檔：{filename}，事件數：{len(self.events)}")
             self.refresh_script_list()
-        except Exception as e:
-            self.log(f"更名腳本檔案時發生錯誤: {e}")
+            self.script_var.set(filename)
+            with open(LAST_SCRIPT_FILE, "w", encoding="utf-8") as f:
+                f.write(filename)
+        except Exception as ex:
+            self.log(f"[{format_time(time.time())}] 存檔失敗: {ex}")
 
-    # 加入這個方法
     def load_script(self):
-        # 你可以在這裡實作選擇檔案的功能
-        file_path = filedialog.askopenfilename(
-            title="選擇腳本檔案",
-            filetypes=[("JSON Files", "*.json")]
-        )
-        if file_path:
-            self.load_script_file(file_path)
+        path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")], initialdir=SCRIPTS_DIR)
+        if path:
+            with open(path, "r", encoding="utf-8") as f:
+                self.events = json.load(f)
+            self.log(f"[{format_time(time.time())}] 腳本已載入：{os.path.basename(path)}，共 {len(self.events)} 筆事件。")
+            self.refresh_script_list()
+            self.script_var.set(os.path.basename(path))
+            with open(LAST_SCRIPT_FILE, "w", encoding="utf-8") as f:
+                f.write(os.path.basename(path))
+
+    def on_script_selected(self, event=None):
+        script = self.script_var.get()
+        if script:
+            path = os.path.join(SCRIPTS_DIR, script)
+            with open(path, "r", encoding="utf-8") as f:
+                self.events = json.load(f)
+            self.log(f"[{format_time(time.time())}] 腳本已載入：{script}，共 {len(self.events)} 筆事件。")
+            with open(LAST_SCRIPT_FILE, "w", encoding="utf-8") as f:
+                f.write(script)
+
+    def refresh_script_list(self):
+        files = [f for f in os.listdir(SCRIPTS_DIR) if f.endswith('.json')]
+        self.script_combo['values'] = files
+
+    def load_last_script(self):
+        if os.path.exists(LAST_SCRIPT_FILE):
+            with open(LAST_SCRIPT_FILE, "r", encoding="utf-8") as f:
+                last_script = f.read().strip()
+            if last_script:
+                script_path = os.path.join(SCRIPTS_DIR, last_script)
+                if os.path.exists(script_path):
+                    with open(script_path, "r", encoding="utf-8") as f:
+                        self.events = json.load(f)
+                    self.script_var.set(last_script)
+                    self.log(f"[{format_time(time.time())}] 已自動載入上次腳本：{last_script}，共 {len(self.events)} 筆事件。")
 
     def update_mouse_pos(self):
         try:
-            import pyautogui
-            x, y = pyautogui.position()
+            x, y = mouse.get_position()
             self.mouse_pos_label.config(text=f"( X:{x}, Y:{y} )")
-        except Exception as e:
+        except Exception:
             self.mouse_pos_label.config(text="( X:?, Y:? )")
         self.after(100, self.update_mouse_pos)
 
-def move_mouse_abs(x, y):
-    # 設定滑鼠移動的絕對位置
-    ctypes.windll.user32.SetCursorPos(int(x), int(y))
+    def rename_script(self):
+        old_name = self.script_var.get()
+        new_name = self.rename_var.get().strip()
+        if not old_name or not new_name:
+            self.log(f"[{format_time(time.time())}] 請選擇腳本並輸入新名稱。")
+            return
+        if not new_name.endswith('.json'):
+            new_name += '.json'
+        old_path = os.path.join(SCRIPTS_DIR, old_name)
+        new_path = os.path.join(SCRIPTS_DIR, new_name)
+        if os.path.exists(new_path):
+            self.log(f"[{format_time(time.time())}] 檔案已存在，請換個名稱。")
+            return
+        try:
+            os.rename(old_path, new_path)
+            self.log(f"[{format_time(time.time())}] 腳本已更名為：{new_name}")
+            self.refresh_script_list()
+            self.script_var.set(new_name)
+            with open(LAST_SCRIPT_FILE, "w", encoding="utf-8") as f:
+                f.write(new_name)
+        except Exception as e:
+            self.log(f"[{format_time(time.time())}] 更名失敗: {e}")
 
-def mouse_event_win(event, button='left'):
-    # 模擬滑鼠事件
-    btn = {
-        'left': 0x0002,
-        'right': 0x0008,
-        'middle': 0x0020
-    }.get(button, 0x0002)
-    if event == 'down':
-        ctypes.windll.user32.mouse_event(btn, 0, 0, 0, 0)
-    elif event == 'up':
-        ctypes.windll.user32.mouse_event(btn | 0x0004, 0, 0, 0, 0)
+    def open_scripts_dir(self):
+        path = os.path.abspath(SCRIPTS_DIR)
+        os.startfile(path)
+
+    def _on_mouse_event(self, event):
+        if self.recording and not self.paused:
+            if event.__class__.__name__ == "ButtonEvent":
+                self.log(f"滑鼠事件: {event.event_type} {getattr(event, 'button', 'left')} @ ({event.x},{event.y})")
+                self._mouse_events.append({
+                    'type': 'mouse',
+                    'event': event.event_type,
+                    'button': getattr(event, 'button', 'left'),
+                    'x': event.x,
+                    'y': event.y,
+                    'time': time.time(),
+                })
+            # 滑鼠滾輪事件
+            elif event.__class__.__name__ == "WheelEvent":
+                self._mouse_events.append({
+                    'type': 'mouse',
+                    'event': 'wheel',
+                    'delta': event.delta,
+                    'x': event.x,
+                    'y': event.y,
+                    'time': time.time(),
+                })
+            # 滑鼠移動事件（通常不需額外記錄，已由 move_watcher 處理）
+            # elif event.__class__.__name__ == "MoveEvent":
+            #     pass
+
+# Windows API 滑鼠控制
+def move_mouse_abs(x, y):
+    user32 = ctypes.windll.user32
+    screen_width = user32.GetSystemMetrics(0)
+    screen_height = user32.GetSystemMetrics(1)
+    abs_x = int(x * 65535 / (screen_width - 1))
+    abs_y = int(y * 65535 / (screen_height - 1))
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [("dx", ctypes.c_long),
+                    ("dy", ctypes.c_long),
+                    ("mouseData", ctypes.c_ulong),
+                    ("dwFlags", ctypes.c_ulong),
+                    ("time", ctypes.c_ulong),
+                    ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", ctypes.c_ulong),
+                    ("mi", MOUSEINPUT)]
+    inp = INPUT()
+    inp.type = 0
+    inp.mi = MOUSEINPUT(abs_x, abs_y, 0, 0x8001, 0, None)  # 0x8001 = MOVE | ABSOLUTE
+    ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+
+def move_mouse_abs_safe(x, y):
+    user32 = ctypes.windll.user32
+    screen_width = user32.GetSystemMetrics(0)
+    screen_height = user32.GetSystemMetrics(1)
+    x = max(0, min(x, screen_width - 1))
+    y = max(0, min(y, screen_height - 1))
+    abs_x = int(x * 65535 / (screen_width - 1))
+    abs_y = int(y * 65535 / (screen_height - 1))
+    inp = INPUT()
+    inp.type = 0
+    inp.mi = MOUSEINPUT(abs_x, abs_y, 0, 0x8001, 0, None)
+    ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+
+def mouse_event_win(event, x=0, y=0, button='left', delta=0):
+    user32 = ctypes.windll.user32
+    if event == 'down' or event == 'up':
+        flags = {'left': (0x0002, 0x0004), 'right': (0x0008, 0x0010), 'middle': (0x0020, 0x0040)}
+        flag = flags.get(button, (0x0002, 0x0004))[0 if event == 'down' else 1]
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [("dx", ctypes.c_long),
+                        ("dy", ctypes.c_long),
+                        ("mouseData", ctypes.c_ulong),
+                        ("dwFlags", ctypes.c_ulong),
+                        ("time", ctypes.c_ulong),
+                        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+        class INPUT(ctypes.Structure):
+            _fields_ = [("type", ctypes.c_ulong),
+                        ("mi", MOUSEINPUT)]
+        inp = INPUT()
+        inp.type = 0
+        inp.mi = MOUSEINPUT(0, 0, 0, flag, 0, None)
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+    elif event == 'wheel':
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [("dx", ctypes.c_long),
+                        ("dy", ctypes.c_long),
+                        ("mouseData", ctypes.c_ulong),
+                        ("dwFlags", ctypes.c_ulong),
+                        ("time", ctypes.c_ulong),
+                        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+        class INPUT(ctypes.Structure):
+            _fields_ = [("type", ctypes.c_ulong),
+                        ("mi", MOUSEINPUT)]
+        inp = INPUT()
+        inp.type = 0
+        inp.mi = MOUSEINPUT(0, 0, int(delta * 120), 0x0800, 0, None)  # 0x0800 = WHEEL
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
 
 if __name__ == "__main__":
     app = RecorderApp()
