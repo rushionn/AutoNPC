@@ -8,6 +8,7 @@ import tkinter as tk
 import pythoncom
 from win32com.shell import shell, shellcon
 import subprocess
+import sys
 
 LAST_PATH_FILE = "last_path.txt"
 
@@ -39,7 +40,12 @@ def open_files_in_folder(folder_path, interval=4, log_func=None):
                 if target and os.path.exists(target):
                     if log_func:
                         log_func(f"Opening shortcut target: {target} {args}")
-                    subprocess.Popen(f'"{target}" {args}', shell=True)
+                    # 隱藏 cmd 視窗
+                    subprocess.Popen(
+                        f'"{target}" {args}',
+                        shell=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
                 else:
                     if log_func:
                         log_func(f"無法解析捷徑或目標不存在: {file_path}")
