@@ -9,6 +9,7 @@ import subprocess
 import pynput.mouse
 import pyautogui
 import ctypes
+import win32api
 
 # Windows API 結構定義（只定義一次）
 class MOUSEINPUT(ctypes.Structure):
@@ -464,38 +465,19 @@ class RecorderApp(tb.Window):
 
 # Windows API 滑鼠控制
 def move_mouse_abs(x, y):
-    user32 = ctypes.windll.user32
-    screen_width = user32.GetSystemMetrics(0)
-    screen_height = user32.GetSystemMetrics(1)
-    abs_x = int(x * 65535 / (screen_width - 1))
-    abs_y = int(y * 65535 / (screen_height - 1))
-    class MOUSEINPUT(ctypes.Structure):
-        _fields_ = [("dx", ctypes.c_long),
-                    ("dy", ctypes.c_long),
-                    ("mouseData", ctypes.c_ulong),
-                    ("dwFlags", ctypes.c_ulong),
-                    ("time", ctypes.c_ulong),
-                    ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
-    class INPUT(ctypes.Structure):
-        _fields_ = [("type", ctypes.c_ulong),
-                    ("mi", MOUSEINPUT)]
-    inp = INPUT()
-    inp.type = 0
-    inp.mi = MOUSEINPUT(abs_x, abs_y, 0, 0x8001, 0, None)  # 0x8001 = MOVE | ABSOLUTE
-    ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+    # 直接用全域座標移動滑鼠
+    ctypes.windll.user32.SetCursorPos(int(x), int(y))
 
 def move_mouse_abs_safe(x, y):
-    user32 = ctypes.windll.user32
-    screen_width = user32.GetSystemMetrics(0)
-    screen_height = user32.GetSystemMetrics(1)
-    x = max(0, min(x, screen_width - 1))
-    y = max(0, min(y, screen_height - 1))
-    abs_x = int(x * 65535 / (screen_width - 1))
-    abs_y = int(y * 65535 / (screen_height - 1))
-    inp = INPUT()
-    inp.type = 0
-    inp.mi = MOUSEINPUT(abs_x, abs_y, 0, 0x8001, 0, None)
-    ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+    # 取得所有螢幕範圍，避免滑鼠超出
+    from screeninfo import get_monitors
+    min_x = min(m.x for m in get_monitors())
+    min_y = min(m.y for m in get_monitors())
+    max_x = max(m.x + m.width for m in get_monitors())
+    max_y = max(m.y + m.height for m in get_monitors())
+    x = max(min_x, min(x, max_x - 1))
+    y = max(min_y, min(y, max_y - 1))
+    ctypes.windll.user32.SetCursorPos(int(x), int(y))
 
 def mouse_event_win(event, x=0, y=0, button='left', delta=0):
     user32 = ctypes.windll.user32
