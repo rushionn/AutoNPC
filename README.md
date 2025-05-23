@@ -8,5 +8,5 @@
 I made this tool with love and late-night coffee. Support is welcome!  
 時間かけて作りました。お気持ちいただけたらうれしいです！
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_orange.svg)](https://ko-fi.com/B0B51FBVA8)
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/B0B51FBVA8)
 
