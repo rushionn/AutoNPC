@@ -5,6 +5,7 @@ import threading, time, json, os, datetime
 import keyboard, mouse
 import ctypes
 import win32api
+import tkinter.filedialog
 
 # ====== 滑鼠控制函式放在這裡 ======
 def move_mouse_abs(x, y):
@@ -50,6 +51,7 @@ def mouse_event_win(event, x=0, y=0, button='left', delta=0):
 # ====== RecorderApp 類別與其餘程式碼 ======
 SCRIPTS_DIR = "scripts"
 LAST_SCRIPT_FILE = "last_script.txt"
+LAST_SKIN_FILE = "last_skin.txt"  # 新增這行
 MOUSE_SAMPLE_INTERVAL = 0.01  # 10ms
 
 def format_time(ts):
@@ -57,7 +59,9 @@ def format_time(ts):
 
 class RecorderApp(tb.Window):
     def __init__(self):
-        super().__init__(themename="darkly")
+        self.user_config = load_user_config()
+        skin = self.user_config.get("skin", "darkly")
+        super().__init__(themename=skin)
         self._hotkey_handlers = {}
         self.tiny_window = None
 
@@ -81,8 +85,10 @@ class RecorderApp(tb.Window):
         self._play_start_time = None
         self._total_play_time = 0
 
-        if not os.path.exists(SCRIPTS_DIR):
-            os.makedirs(SCRIPTS_DIR)
+        # 設定腳本資料夾
+        self.script_dir = self.user_config.get("script_dir", SCRIPTS_DIR)
+        if not os.path.exists(self.script_dir):
+            os.makedirs(self.script_dir)
 
         # 快捷鍵設定，新增 tiny
         self.hotkey_map = {
@@ -124,17 +130,16 @@ class RecorderApp(tb.Window):
         frm_bottom = tb.Frame(self, padding=(10, 0, 10, 5))
         frm_bottom.pack(fill="x")
         tb.Label(frm_bottom, text="回放速度:", style="My.TLabel").grid(row=0, column=0, padx=(0,2))
-        self.speed_var = tk.StringVar(value="1.0")
+        self.speed_var = tk.StringVar(value=self.user_config.get("speed", "1.0"))
         tb.Entry(frm_bottom, textvariable=self.speed_var, width=6, style="My.TEntry").grid(row=0, column=1, padx=2)
-        tb.Button(frm_bottom, text="選擇來源", command=self.load_script, bootstyle=SECONDARY, width=10, style="My.TButton").grid(row=0, column=2, padx=4)
-        tb.Button(frm_bottom, text="預設路徑", command=self.open_scripts_dir, bootstyle=SECONDARY, width=10, style="My.TButton").grid(row=0, column=3, padx=4)
+        tb.Button(frm_bottom, text="預設路徑", command=self.use_default_script_dir, bootstyle=SECONDARY, width=10, style="My.TButton").grid(row=0, column=3, padx=4)
         tb.Button(frm_bottom, text="快捷鍵", command=self.open_hotkey_settings, bootstyle=SECONDARY, width=10, style="My.TButton").grid(row=0, column=4, padx=4)
 
         # ====== 重複次數設定 ======
         frm_repeat = tb.Frame(self, padding=(10, 0, 10, 5))
         frm_repeat.pack(fill="x")
         tb.Label(frm_repeat, text="重複次數:", style="My.TLabel").grid(row=0, column=0, padx=(0,2))
-        self.repeat_var = tk.StringVar(value="1")
+        self.repeat_var = tk.StringVar(value=self.user_config.get("repeat", "1"))
         tb.Entry(frm_repeat, textvariable=self.repeat_var, width=6, style="My.TEntry").grid(row=0, column=1, padx=2)
         tb.Label(frm_repeat, text="次", style="My.TLabel").grid(row=0, column=2, padx=(0,2))
 
@@ -142,7 +147,7 @@ class RecorderApp(tb.Window):
         frm_script = tb.Frame(self, padding=(10, 0, 10, 5))
         frm_script.pack(fill="x")
         tb.Label(frm_script, text="腳本選單:", style="My.TLabel").grid(row=0, column=0, sticky="w")
-        self.script_var = tk.StringVar()
+        self.script_var = tk.StringVar(value=self.user_config.get("last_script", ""))
         self.script_combo = tb.Combobox(frm_script, textvariable=self.script_var, width=30, state="readonly", style="My.TCombobox")
         self.script_combo.grid(row=0, column=1, sticky="w", padx=4)
         self.rename_var = tk.StringVar()
@@ -152,6 +157,8 @@ class RecorderApp(tb.Window):
 
         self.script_combo.bind("<<ComboboxSelected>>", self.on_script_selected)
         self.refresh_script_list()
+        if self.script_var.get():
+            self.on_script_selected()
 
         # ====== 日誌顯示區 ======
         frm_log = tb.Frame(self, padding=(10, 0, 10, 10))
@@ -179,12 +186,25 @@ class RecorderApp(tb.Window):
         self.log_text.config(yscrollcommand=log_scroll.set)
 
         # ====== 其餘初始化 ======
+        self.after(100, self._delayed_init)
+
+    def _delayed_init(self):
         self._register_hotkeys()
-        self.load_last_script()
-        self.update_mouse_pos()
+        self.refresh_script_list()
+        self.after(100, self.load_last_script)
+        self.after(200, self.update_mouse_pos)
+
+    def save_config(self):
+        self.user_config["skin"] = self.theme_var.get()
+        self.user_config["last_script"] = self.script_var.get()
+        self.user_config["repeat"] = self.repeat_var.get()
+        self.user_config["speed"] = self.speed_var.get()
+        self.user_config["script_dir"] = self.script_dir
+        save_user_config(self.user_config)
 
     def change_theme(self):
         self.style.theme_use(self.theme_var.get())
+        self.save_config()
 
     def log(self, msg):
         self.log_text.configure(state="normal")
@@ -466,9 +486,9 @@ class RecorderApp(tb.Window):
 
     def auto_save_script(self):
         try:
-            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"record_{ts}.json"
-            path = os.path.join(SCRIPTS_DIR, filename)
+            ts = datetime.datetime.now().strftime("%Y_%m%d_%H%M_%S")
+            filename = f"{ts}.json"
+            path = os.path.join(self.script_dir, filename)
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(self.events, f, ensure_ascii=False, indent=2)
             self.log(f"[{format_time(time.time())}] 自動存檔：{filename}，事件數：{len(self.events)}")
@@ -500,10 +520,14 @@ class RecorderApp(tb.Window):
             self.log(f"[{format_time(time.time())}] 腳本已載入：{script}，共 {len(self.events)} 筆事件。")
             with open(LAST_SCRIPT_FILE, "w", encoding="utf-8") as f:
                 f.write(script)
+        self.save_config()
 
     def refresh_script_list(self):
-        files = [f for f in os.listdir(SCRIPTS_DIR) if f.endswith('.json')]
+        files = [f for f in os.listdir(self.script_dir) if f.endswith('.json')]
         self.script_combo['values'] = files
+        # 若目前選擇的腳本不存在於新資料夾，清空選擇
+        if self.script_var.get() not in files:
+            self.script_var.set("")
 
     def load_last_script(self):
         if os.path.exists(LAST_SCRIPT_FILE):
@@ -722,6 +746,40 @@ class RecorderApp(tb.Window):
         x = self.tiny_window.winfo_x() + event.x - self._tiny_drag_x
         y = self.tiny_window.winfo_y() + event.y - self._tiny_drag_y
         self.tiny_window.geometry(f"+{x}+{y}")
+
+    def use_default_script_dir(self):
+        self.script_dir = SCRIPTS_DIR
+        if not os.path.exists(self.script_dir):
+            os.makedirs(self.script_dir)
+        self.refresh_script_list()
+        self.save_config()
+        # 開啟資料夾
+        os.startfile(self.script_dir)
+
+CONFIG_FILE = "user_config.json"
+
+def load_user_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    # 預設值
+    return {
+        "skin": "darkly",
+        "last_script": "",
+        "repeat": "1",
+        "speed": "1.0",
+        "script_dir": SCRIPTS_DIR
+    }
+
+def save_user_config(config):
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     app = RecorderApp()
