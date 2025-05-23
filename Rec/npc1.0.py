@@ -69,7 +69,7 @@ class RecorderApp(tb.Window):
         self.style.configure("My.TCheckbutton", font=("Microsoft JhengHei", 9))
         self.style.configure("TinyBold.TButton", font=("Microsoft JhengHei", 9, "bold"))
 
-        self.title("NPC_1.0   by Lucien")
+        self.title("NPC_2.0   by Lucien")
         self.geometry("900x500")
         self.resizable(False, False)
         self.recording = False
@@ -101,7 +101,7 @@ class RecorderApp(tb.Window):
         self.btn_start.grid(row=0, column=0, padx=4)
         self.btn_pause = tb.Button(frm_top, text=f"暫停/繼續 ({self.hotkey_map['pause']})", command=self.toggle_pause, bootstyle=INFO, width=14, style="My.TButton")
         self.btn_pause.grid(row=0, column=1, padx=4)
-        self.btn_stop = tb.Button(frm_top, text=f"停止錄製 ({self.hotkey_map['stop']})", command=self.stop_record, bootstyle=WARNING, width=14, style="My.TButton")
+        self.btn_stop = tb.Button(frm_top, text=f"停止 ({self.hotkey_map['stop']})", command=self.stop_all, bootstyle=WARNING, width=14, style="My.TButton")
         self.btn_stop.grid(row=0, column=2, padx=4)
         self.btn_play = tb.Button(frm_top, text=f"回放 ({self.hotkey_map['play']})", command=self.play_record, bootstyle=SUCCESS, width=10, style="My.TButton")
         self.btn_play.grid(row=0, column=3, padx=4)
@@ -227,10 +227,12 @@ class RecorderApp(tb.Window):
 
     def _record_thread(self):
         try:
-            keyboard.start_recording()
             self._mouse_events = []
             self._recording_mouse = True
             self._record_start_time = time.time()
+
+            # 先啟動 keyboard 與 mouse 監聽
+            keyboard.start_recording()
 
             from pynput.mouse import Controller
             mouse_ctrl = Controller()
@@ -262,6 +264,16 @@ class RecorderApp(tb.Window):
                 on_scroll=on_scroll
             )
             mouse_listener.start()
+
+            # 立即記錄當下滑鼠位置（避免剛開始沒動作時漏記）
+            now = time.time()
+            self._mouse_events.append({
+                'type': 'mouse',
+                'event': 'move',
+                'x': last_pos[0],
+                'y': last_pos[1],
+                'time': now
+            })
 
             while self.recording:
                 now = time.time()
@@ -299,6 +311,20 @@ class RecorderApp(tb.Window):
             self.recording = False
             self.log(f"[{format_time(time.time())}] 停止錄製。")
             self._wait_record_thread_finish()
+
+    def stop_all(self):
+        stopped = False
+        if self.recording:
+            self.recording = False
+            stopped = True
+            self.log(f"[{format_time(time.time())}] 停止錄製。")
+            self._wait_record_thread_finish()
+        if self.playing:
+            self.playing = False
+            stopped = True
+            self.log(f"[{format_time(time.time())}] 停止回放。")
+        if not stopped:
+            self.log(f"[{format_time(time.time())}] 無進行中動作可停止。")
 
     def _wait_record_thread_finish(self):
         if hasattr(self, '_record_thread_handle') and self._record_thread_handle.is_alive():
@@ -370,26 +396,39 @@ class RecorderApp(tb.Window):
         for _ in range(repeat):
             self._current_play_index = 0
             total_events = len(self.events)
-            if total_events == 0:
+            if total_events == 0 or not self.playing:
                 break
             base_time = self.events[0]['time']
             play_start = time.time()
             while self._current_play_index < total_events:
+                if not self.playing:
+                    break  # 強制中斷回放
                 while self.paused:
+                    if not self.playing:
+                        break  # 強制中斷回放
                     time.sleep(0.05)
+                    play_start += 0.05  # 修正暫停期間的基準時間
+                if not self.playing:
+                    break  # 強制中斷回放
                 i = self._current_play_index
                 e = self.events[i]
                 event_offset = (e['time'] - base_time) / self.speed
                 target_time = play_start + event_offset
                 while True:
                     now = time.time()
+                    if not self.playing:
+                        break  # 強制中斷回放
                     if now >= target_time:
                         break
                     if self.paused:
+                        if not self.playing:
+                            break
                         time.sleep(0.05)
                         target_time += 0.05
                         continue
                     time.sleep(min(0.01, target_time - now))
+                if not self.playing:
+                    break  # 強制中斷回放
                 if e['type'] == 'keyboard':
                     if e['event'] == 'down':
                         keyboard.press(e['name'])
@@ -409,6 +448,8 @@ class RecorderApp(tb.Window):
                         mouse_event_win('wheel', delta=e.get('delta', 0))
                         self.log(f"[{format_time(e['time'])}] 滑鼠: {e}")
                 self._current_play_index += 1
+            if not self.playing:
+                break  # 強制中斷回放
         self.playing = False
         self.paused = False
         self.log(f"[{format_time(time.time())}] 回放結束。")
@@ -527,41 +568,71 @@ class RecorderApp(tb.Window):
         vars = {}
         entries = {}
         row = 0
+
+        # 用於記錄目前按下的組合鍵
+        pressed_keys = {}
+
+        def on_entry_key(event, key, var):
+            key_name = event.keysym.upper()
+            # 如果是 F1~F12，直接設為 F1~F12
+            if key_name in [f"F{i}" for i in range(1, 13)]:
+                var.set(key_name)
+            else:
+                keys = []
+                if event.state & 0x0001: keys.append("SHIFT")
+                if event.state & 0x0004: keys.append("CTRL")
+                if event.state & 0x0008: keys.append("ALT")
+                # 避免重複加入
+                if key_name not in keys and key_name not in ("SHIFT", "CONTROL", "ALT", "CAPS_LOCK"):
+                    keys.append(key_name)
+                var.set("+".join(keys))
+            return "break"
+
+        def on_entry_focus_in(event, var):
+            var.set("請按下組合鍵")
+
+        def on_entry_focus_out(event, key, var):
+            # 若未輸入組合鍵則還原為原本設定
+            if var.get() == "請按下組合鍵" or not var.get():
+                var.set(self.hotkey_map[key])
+
         for key, label in labels.items():
             tb.Label(win, text=label, font=("Microsoft JhengHei", 11)).grid(row=row, column=0, padx=10, pady=8, sticky="w")
             var = tk.StringVar(value=self.hotkey_map[key])
-            entry = tb.Entry(win, textvariable=var, width=16, font=("Consolas", 11), state="readonly")
+            entry = tb.Entry(win, textvariable=var, width=16, font=("Consolas", 11), state="normal")
             entry.grid(row=row, column=1, padx=10)
             vars[key] = var
             entries[key] = entry
-            entry.bind("<KeyPress>", self._make_hotkey_entry_handler(var))
-            entry.bind("<FocusIn>", lambda e, v=var: v.set("請按下組合鍵"))
-            entry.bind("<FocusOut>", lambda e, k=key: vars[k].set(self.hotkey_map[k]))
-            entry.config(state="normal")
+            # 綁定事件
+            entry.bind("<KeyPress>", lambda e, k=key, v=var: on_entry_key(e, k, v))
+            entry.bind("<FocusIn>", lambda e, v=var: on_entry_focus_in(e, v))
+            entry.bind("<FocusOut>", lambda e, k=key, v=var: on_entry_focus_out(e, k, v))
             row += 1
 
         def save_and_apply():
             for key in self.hotkey_map:
-                self.hotkey_map[key] = vars[key].get().upper()
+                val = vars[key].get()
+                # TinyMode 可任意組合，其餘僅允許 F1~F12
+                if key != "tiny":
+                    # 僅允許 F1~F12，且不能有組合鍵
+                    if val and val != "請按下組合鍵":
+                        if val.upper() in [f"F{i}" for i in range(1, 13)]:
+                            self.hotkey_map[key] = val.upper()
+                        else:
+                            self.log(f"{labels[key]} 只能設定為 F1~F12，請重新設定。")
+                            return
+                else:
+                    # TinyMode 可任意組合
+                    if val and val != "請按下組合鍵":
+                        self.hotkey_map[key] = val.upper()
             self._register_hotkeys()
             self._update_hotkey_labels()
-            win.destroy()
             self.log("快捷鍵設定已更新。")
+            win.destroy()  # 確保最後才關閉視窗
 
         tb.Button(win, text="儲存", command=save_and_apply, width=10, bootstyle=SUCCESS).grid(row=row, column=0, columnspan=2, pady=16)
 
-    def _make_hotkey_entry_handler(self, var):
-        def handler(event):
-            keys = []
-            if event.state & 0x0001: keys.append("SHIFT")
-            if event.state & 0x0004: keys.append("CTRL")
-            if event.state & 0x0008: keys.append("ALT")
-            key_name = event.keysym.upper()
-            if key_name not in keys:
-                keys.append(key_name)
-            var.set("+".join(keys))
-            return "break"
-        return handler
+    # 不再需要 _make_hotkey_entry_handler
 
     def _register_hotkeys(self):
         for handler in self._hotkey_handlers.values():
@@ -575,7 +646,7 @@ class RecorderApp(tb.Window):
                 handler = keyboard.add_hotkey(hotkey, getattr(self, {
                     "start": "start_record",
                     "pause": "toggle_pause",
-                    "stop": "stop_record",
+                    "stop": "stop_all",
                     "play": "play_record",
                     "tiny": "toggle_tiny_mode"  # <--- 加這行
                 }[key]))
@@ -586,7 +657,7 @@ class RecorderApp(tb.Window):
     def _update_hotkey_labels(self):
         self.btn_start.config(text=f"開始錄製 ({self.hotkey_map['start']})")
         self.btn_pause.config(text=f"暫停/繼續 ({self.hotkey_map['pause']})")
-        self.btn_stop.config(text=f"停止錄製 ({self.hotkey_map['stop']})")
+        self.btn_stop.config(text=f"停止 ({self.hotkey_map['stop']})")
         self.btn_play.config(text=f"回放 ({self.hotkey_map['play']})")
         # TinyMode 按鈕同步更新
         if hasattr(self, "tiny_btns"):
@@ -625,7 +696,7 @@ class RecorderApp(tb.Window):
                         command=getattr(self, {
                             "start": "start_record",
                             "pause": "toggle_pause",
-                            "stop": "stop_record",
+                            "stop": "stop_all",
                             "play": "play_record",
                             "tiny": "toggle_tiny_mode"
                         }[key])

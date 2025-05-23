@@ -5,6 +5,7 @@ import threading, time, json, os, datetime
 import keyboard, mouse
 import ctypes
 import win32api
+import tkinter.filedialog
 
 # ====== 滑鼠控制函式放在這裡 ======
 def move_mouse_abs(x, y):
@@ -50,6 +51,7 @@ def mouse_event_win(event, x=0, y=0, button='left', delta=0):
 # ====== RecorderApp 類別與其餘程式碼 ======
 SCRIPTS_DIR = "scripts"
 LAST_SCRIPT_FILE = "last_script.txt"
+LAST_SKIN_FILE = "last_skin.txt"  # 新增這行
 MOUSE_SAMPLE_INTERVAL = 0.01  # 10ms
 
 def format_time(ts):
@@ -57,7 +59,9 @@ def format_time(ts):
 
 class RecorderApp(tb.Window):
     def __init__(self):
-        super().__init__(themename="darkly")
+        self.user_config = load_user_config()
+        skin = self.user_config.get("skin", "darkly")
+        super().__init__(themename=skin)
         self._hotkey_handlers = {}
         self.tiny_window = None
 
@@ -69,7 +73,7 @@ class RecorderApp(tb.Window):
         self.style.configure("My.TCheckbutton", font=("Microsoft JhengHei", 9))
         self.style.configure("TinyBold.TButton", font=("Microsoft JhengHei", 9, "bold"))
 
-        self.title("NPC_1.0   by Lucien")
+        self.title("NPC_2.0   by Lucien")
         self.geometry("900x500")
         self.resizable(False, False)
         self.recording = False
@@ -81,8 +85,10 @@ class RecorderApp(tb.Window):
         self._play_start_time = None
         self._total_play_time = 0
 
-        if not os.path.exists(SCRIPTS_DIR):
-            os.makedirs(SCRIPTS_DIR)
+        # 設定腳本資料夾
+        self.script_dir = self.user_config.get("script_dir", SCRIPTS_DIR)
+        if not os.path.exists(self.script_dir):
+            os.makedirs(self.script_dir)
 
         # 快捷鍵設定，新增 tiny
         self.hotkey_map = {
@@ -94,47 +100,46 @@ class RecorderApp(tb.Window):
         }
 
         # ====== 上方操作區 ======
-        frm_top = tb.Frame(self, padding=(10, 8, 10, 4))
+        frm_top = tb.Frame(self, padding=(10, 10, 10, 5))
         frm_top.pack(fill="x")
 
         self.btn_start = tb.Button(frm_top, text=f"開始錄製 ({self.hotkey_map['start']})", command=self.start_record, bootstyle=PRIMARY, width=14, style="My.TButton")
-        self.btn_start.grid(row=0, column=0, padx=6)
+        self.btn_start.grid(row=0, column=0, padx=4)
         self.btn_pause = tb.Button(frm_top, text=f"暫停/繼續 ({self.hotkey_map['pause']})", command=self.toggle_pause, bootstyle=INFO, width=14, style="My.TButton")
-        self.btn_pause.grid(row=0, column=1, padx=6)
-        self.btn_stop = tb.Button(frm_top, text=f"停止錄製 ({self.hotkey_map['stop']})", command=self.stop_record, bootstyle=WARNING, width=14, style="My.TButton")
-        self.btn_stop.grid(row=0, column=2, padx=6)
+        self.btn_pause.grid(row=0, column=1, padx=4)
+        self.btn_stop = tb.Button(frm_top, text=f"停止 ({self.hotkey_map['stop']})", command=self.stop_all, bootstyle=WARNING, width=14, style="My.TButton")
+        self.btn_stop.grid(row=0, column=2, padx=4)
         self.btn_play = tb.Button(frm_top, text=f"回放 ({self.hotkey_map['play']})", command=self.play_record, bootstyle=SUCCESS, width=10, style="My.TButton")
-        self.btn_play.grid(row=0, column=3, padx=6)
+        self.btn_play.grid(row=0, column=3, padx=4)
+
+        # ====== skin下拉選單 ======
+        themes = ["darkly", "cyborg", "superhero", "journal","minty", "united", "morph", "lumen"]
+        self.theme_var = tk.StringVar(value=self.style.theme_use())
+        theme_combo = tb.Combobox(frm_top, textvariable=self.theme_var, values=themes, state="readonly", width=12, style="My.TCombobox")
+        theme_combo.grid(row=0, column=8, padx=(0, 4), sticky="e")
+        theme_combo.bind("<<ComboboxSelected>>", lambda e: self.change_theme())
 
         # TinyMode 按鈕（粗體，skin下拉選單左側）
         self.tiny_mode_btn = tb.Button(
             frm_top, text="TinyMode", style="TinyBold.TButton",
             command=self.toggle_tiny_mode, width=10
         )
-        self.tiny_mode_btn.grid(row=0, column=4, padx=(16, 4), sticky="e")
-
-        # skin下拉選單（最右側）
-        themes = ["darkly", "cyborg", "superhero", "journal","minty", "united", "morph", "lumen"]
-        self.theme_var = tk.StringVar(value=self.style.theme_use())
-        theme_combo = tb.Combobox(frm_top, textvariable=self.theme_var, values=themes, state="readonly", width=12, style="My.TCombobox")
-        theme_combo.grid(row=0, column=5, padx=(0, 4), sticky="e")
-        theme_combo.bind("<<ComboboxSelected>>", lambda e: self.change_theme())
+        self.tiny_mode_btn.grid(row=0, column=7, padx=(0, 4), sticky="e")
 
         # ====== 下方操作區 ======
         frm_bottom = tb.Frame(self, padding=(10, 0, 10, 5))
         frm_bottom.pack(fill="x")
         tb.Label(frm_bottom, text="回放速度:", style="My.TLabel").grid(row=0, column=0, padx=(0,2))
-        self.speed_var = tk.StringVar(value="1.0")
+        self.speed_var = tk.StringVar(value=self.user_config.get("speed", "1.0"))
         tb.Entry(frm_bottom, textvariable=self.speed_var, width=6, style="My.TEntry").grid(row=0, column=1, padx=2)
-        tb.Button(frm_bottom, text="選擇來源", command=self.load_script, bootstyle=SECONDARY, width=10, style="My.TButton").grid(row=0, column=2, padx=4)
-        tb.Button(frm_bottom, text="預設路徑", command=self.open_scripts_dir, bootstyle=SECONDARY, width=10, style="My.TButton").grid(row=0, column=3, padx=4)
+        tb.Button(frm_bottom, text="預設路徑", command=self.use_default_script_dir, bootstyle=SECONDARY, width=10, style="My.TButton").grid(row=0, column=3, padx=4)
         tb.Button(frm_bottom, text="快捷鍵", command=self.open_hotkey_settings, bootstyle=SECONDARY, width=10, style="My.TButton").grid(row=0, column=4, padx=4)
 
         # ====== 重複次數設定 ======
         frm_repeat = tb.Frame(self, padding=(10, 0, 10, 5))
         frm_repeat.pack(fill="x")
         tb.Label(frm_repeat, text="重複次數:", style="My.TLabel").grid(row=0, column=0, padx=(0,2))
-        self.repeat_var = tk.StringVar(value="1")
+        self.repeat_var = tk.StringVar(value=self.user_config.get("repeat", "1"))
         tb.Entry(frm_repeat, textvariable=self.repeat_var, width=6, style="My.TEntry").grid(row=0, column=1, padx=2)
         tb.Label(frm_repeat, text="次", style="My.TLabel").grid(row=0, column=2, padx=(0,2))
 
@@ -142,7 +147,7 @@ class RecorderApp(tb.Window):
         frm_script = tb.Frame(self, padding=(10, 0, 10, 5))
         frm_script.pack(fill="x")
         tb.Label(frm_script, text="腳本選單:", style="My.TLabel").grid(row=0, column=0, sticky="w")
-        self.script_var = tk.StringVar()
+        self.script_var = tk.StringVar(value=self.user_config.get("last_script", ""))
         self.script_combo = tb.Combobox(frm_script, textvariable=self.script_var, width=30, state="readonly", style="My.TCombobox")
         self.script_combo.grid(row=0, column=1, sticky="w", padx=4)
         self.rename_var = tk.StringVar()
@@ -152,6 +157,8 @@ class RecorderApp(tb.Window):
 
         self.script_combo.bind("<<ComboboxSelected>>", self.on_script_selected)
         self.refresh_script_list()
+        if self.script_var.get():
+            self.on_script_selected()
 
         # ====== 日誌顯示區 ======
         frm_log = tb.Frame(self, padding=(10, 0, 10, 10))
@@ -179,12 +186,25 @@ class RecorderApp(tb.Window):
         self.log_text.config(yscrollcommand=log_scroll.set)
 
         # ====== 其餘初始化 ======
+        self.after(100, self._delayed_init)
+
+    def _delayed_init(self):
         self._register_hotkeys()
-        self.load_last_script()
-        self.update_mouse_pos()
+        self.refresh_script_list()
+        self.after(100, self.load_last_script)
+        self.after(200, self.update_mouse_pos)
+
+    def save_config(self):
+        self.user_config["skin"] = self.theme_var.get()
+        self.user_config["last_script"] = self.script_var.get()
+        self.user_config["repeat"] = self.repeat_var.get()
+        self.user_config["speed"] = self.speed_var.get()
+        self.user_config["script_dir"] = self.script_dir
+        save_user_config(self.user_config)
 
     def change_theme(self):
         self.style.theme_use(self.theme_var.get())
+        self.save_config()
 
     def log(self, msg):
         self.log_text.configure(state="normal")
@@ -227,10 +247,12 @@ class RecorderApp(tb.Window):
 
     def _record_thread(self):
         try:
-            keyboard.start_recording()
             self._mouse_events = []
             self._recording_mouse = True
             self._record_start_time = time.time()
+
+            # 先啟動 keyboard 與 mouse 監聽
+            keyboard.start_recording()
 
             from pynput.mouse import Controller
             mouse_ctrl = Controller()
@@ -262,6 +284,16 @@ class RecorderApp(tb.Window):
                 on_scroll=on_scroll
             )
             mouse_listener.start()
+
+            # 立即記錄當下滑鼠位置（避免剛開始沒動作時漏記）
+            now = time.time()
+            self._mouse_events.append({
+                'type': 'mouse',
+                'event': 'move',
+                'x': last_pos[0],
+                'y': last_pos[1],
+                'time': now
+            })
 
             while self.recording:
                 now = time.time()
@@ -299,6 +331,20 @@ class RecorderApp(tb.Window):
             self.recording = False
             self.log(f"[{format_time(time.time())}] 停止錄製。")
             self._wait_record_thread_finish()
+
+    def stop_all(self):
+        stopped = False
+        if self.recording:
+            self.recording = False
+            stopped = True
+            self.log(f"[{format_time(time.time())}] 停止錄製。")
+            self._wait_record_thread_finish()
+        if self.playing:
+            self.playing = False
+            stopped = True
+            self.log(f"[{format_time(time.time())}] 停止回放。")
+        if not stopped:
+            self.log(f"[{format_time(time.time())}] 無進行中動作可停止。")
 
     def _wait_record_thread_finish(self):
         if hasattr(self, '_record_thread_handle') and self._record_thread_handle.is_alive():
@@ -370,26 +416,39 @@ class RecorderApp(tb.Window):
         for _ in range(repeat):
             self._current_play_index = 0
             total_events = len(self.events)
-            if total_events == 0:
+            if total_events == 0 or not self.playing:
                 break
             base_time = self.events[0]['time']
             play_start = time.time()
             while self._current_play_index < total_events:
+                if not self.playing:
+                    break  # 強制中斷回放
                 while self.paused:
+                    if not self.playing:
+                        break  # 強制中斷回放
                     time.sleep(0.05)
+                    play_start += 0.05  # 修正暫停期間的基準時間
+                if not self.playing:
+                    break  # 強制中斷回放
                 i = self._current_play_index
                 e = self.events[i]
                 event_offset = (e['time'] - base_time) / self.speed
                 target_time = play_start + event_offset
                 while True:
                     now = time.time()
+                    if not self.playing:
+                        break  # 強制中斷回放
                     if now >= target_time:
                         break
                     if self.paused:
+                        if not self.playing:
+                            break
                         time.sleep(0.05)
                         target_time += 0.05
                         continue
                     time.sleep(min(0.01, target_time - now))
+                if not self.playing:
+                    break  # 強制中斷回放
                 if e['type'] == 'keyboard':
                     if e['event'] == 'down':
                         keyboard.press(e['name'])
@@ -409,6 +468,8 @@ class RecorderApp(tb.Window):
                         mouse_event_win('wheel', delta=e.get('delta', 0))
                         self.log(f"[{format_time(e['time'])}] 滑鼠: {e}")
                 self._current_play_index += 1
+            if not self.playing:
+                break  # 強制中斷回放
         self.playing = False
         self.paused = False
         self.log(f"[{format_time(time.time())}] 回放結束。")
@@ -425,17 +486,12 @@ class RecorderApp(tb.Window):
 
     def auto_save_script(self):
         try:
-            # 取得現有 scripts 目錄下的同日同時分的檔案數，作為流水號
-            now = datetime.datetime.now()
-            ts = now.strftime("%Y_%m%d_%H%M")
-            prefix = f"{now.year}_{now.strftime('%m%d')}_{now.strftime('%H%M')}_"
-            exist = [f for f in os.listdir(SCRIPTS_DIR) if f.startswith(prefix)]
-            serial = len(exist) + 1
-            filename = f"{ts}_{serial}.json"
-            path = os.path.join(SCRIPTS_DIR, filename)
+            ts = datetime.datetime.now().strftime("%Y_%m%d_%H%M_%S")
+            filename = f"{ts}.json"
+            path = os.path.join(self.script_dir, filename)
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(self.events, f, ensure_ascii=False, indent=2)
-            self.log(f"[{format_time(now.timestamp())}] 自動存檔：{filename}，事件數：{len(self.events)}")
+            self.log(f"[{format_time(time.time())}] 自動存檔：{filename}，事件數：{len(self.events)}")
             self.refresh_script_list()
             self.script_var.set(filename)
             with open(LAST_SCRIPT_FILE, "w", encoding="utf-8") as f:
@@ -464,10 +520,14 @@ class RecorderApp(tb.Window):
             self.log(f"[{format_time(time.time())}] 腳本已載入：{script}，共 {len(self.events)} 筆事件。")
             with open(LAST_SCRIPT_FILE, "w", encoding="utf-8") as f:
                 f.write(script)
+        self.save_config()
 
     def refresh_script_list(self):
-        files = [f for f in os.listdir(SCRIPTS_DIR) if f.endswith('.json')]
+        files = [f for f in os.listdir(self.script_dir) if f.endswith('.json')]
         self.script_combo['values'] = files
+        # 若目前選擇的腳本不存在於新資料夾，清空選擇
+        if self.script_var.get() not in files:
+            self.script_var.set("")
 
     def load_last_script(self):
         if os.path.exists(LAST_SCRIPT_FILE):
@@ -532,41 +592,71 @@ class RecorderApp(tb.Window):
         vars = {}
         entries = {}
         row = 0
+
+        # 用於記錄目前按下的組合鍵
+        pressed_keys = {}
+
+        def on_entry_key(event, key, var):
+            key_name = event.keysym.upper()
+            # 如果是 F1~F12，直接設為 F1~F12
+            if key_name in [f"F{i}" for i in range(1, 13)]:
+                var.set(key_name)
+            else:
+                keys = []
+                if event.state & 0x0001: keys.append("SHIFT")
+                if event.state & 0x0004: keys.append("CTRL")
+                if event.state & 0x0008: keys.append("ALT")
+                # 避免重複加入
+                if key_name not in keys and key_name not in ("SHIFT", "CONTROL", "ALT", "CAPS_LOCK"):
+                    keys.append(key_name)
+                var.set("+".join(keys))
+            return "break"
+
+        def on_entry_focus_in(event, var):
+            var.set("請按下組合鍵")
+
+        def on_entry_focus_out(event, key, var):
+            # 若未輸入組合鍵則還原為原本設定
+            if var.get() == "請按下組合鍵" or not var.get():
+                var.set(self.hotkey_map[key])
+
         for key, label in labels.items():
             tb.Label(win, text=label, font=("Microsoft JhengHei", 11)).grid(row=row, column=0, padx=10, pady=8, sticky="w")
             var = tk.StringVar(value=self.hotkey_map[key])
-            entry = tb.Entry(win, textvariable=var, width=16, font=("Consolas", 11), state="readonly")
+            entry = tb.Entry(win, textvariable=var, width=16, font=("Consolas", 11), state="normal")
             entry.grid(row=row, column=1, padx=10)
             vars[key] = var
             entries[key] = entry
-            entry.bind("<KeyPress>", self._make_hotkey_entry_handler(var))
-            entry.bind("<FocusIn>", lambda e, v=var: v.set("請按下組合鍵"))
-            entry.bind("<FocusOut>", lambda e, k=key: vars[k].set(self.hotkey_map[k]))
-            entry.config(state="normal")
+            # 綁定事件
+            entry.bind("<KeyPress>", lambda e, k=key, v=var: on_entry_key(e, k, v))
+            entry.bind("<FocusIn>", lambda e, v=var: on_entry_focus_in(e, v))
+            entry.bind("<FocusOut>", lambda e, k=key, v=var: on_entry_focus_out(e, k, v))
             row += 1
 
         def save_and_apply():
             for key in self.hotkey_map:
-                self.hotkey_map[key] = vars[key].get().upper()
+                val = vars[key].get()
+                # TinyMode 可任意組合，其餘僅允許 F1~F12
+                if key != "tiny":
+                    # 僅允許 F1~F12，且不能有組合鍵
+                    if val and val != "請按下組合鍵":
+                        if val.upper() in [f"F{i}" for i in range(1, 13)]:
+                            self.hotkey_map[key] = val.upper()
+                        else:
+                            self.log(f"{labels[key]} 只能設定為 F1~F12，請重新設定。")
+                            return
+                else:
+                    # TinyMode 可任意組合
+                    if val and val != "請按下組合鍵":
+                        self.hotkey_map[key] = val.upper()
             self._register_hotkeys()
             self._update_hotkey_labels()
-            win.destroy()
             self.log("快捷鍵設定已更新。")
+            win.destroy()  # 確保最後才關閉視窗
 
         tb.Button(win, text="儲存", command=save_and_apply, width=10, bootstyle=SUCCESS).grid(row=row, column=0, columnspan=2, pady=16)
 
-    def _make_hotkey_entry_handler(self, var):
-        def handler(event):
-            keys = []
-            if event.state & 0x0001: keys.append("SHIFT")
-            if event.state & 0x0004: keys.append("CTRL")
-            if event.state & 0x0008: keys.append("ALT")
-            key_name = event.keysym.upper()
-            if key_name not in keys:
-                keys.append(key_name)
-            var.set("+".join(keys))
-            return "break"
-        return handler
+    # 不再需要 _make_hotkey_entry_handler
 
     def _register_hotkeys(self):
         for handler in self._hotkey_handlers.values():
@@ -580,7 +670,7 @@ class RecorderApp(tb.Window):
                 handler = keyboard.add_hotkey(hotkey, getattr(self, {
                     "start": "start_record",
                     "pause": "toggle_pause",
-                    "stop": "stop_record",
+                    "stop": "stop_all",
                     "play": "play_record",
                     "tiny": "toggle_tiny_mode"  # <--- 加這行
                 }[key]))
@@ -591,7 +681,7 @@ class RecorderApp(tb.Window):
     def _update_hotkey_labels(self):
         self.btn_start.config(text=f"開始錄製 ({self.hotkey_map['start']})")
         self.btn_pause.config(text=f"暫停/繼續 ({self.hotkey_map['pause']})")
-        self.btn_stop.config(text=f"停止錄製 ({self.hotkey_map['stop']})")
+        self.btn_stop.config(text=f"停止 ({self.hotkey_map['stop']})")
         self.btn_play.config(text=f"回放 ({self.hotkey_map['play']})")
         # TinyMode 按鈕同步更新
         if hasattr(self, "tiny_btns"):
@@ -630,7 +720,7 @@ class RecorderApp(tb.Window):
                         command=getattr(self, {
                             "start": "start_record",
                             "pause": "toggle_pause",
-                            "stop": "stop_record",
+                            "stop": "stop_all",
                             "play": "play_record",
                             "tiny": "toggle_tiny_mode"
                         }[key])
@@ -656,6 +746,40 @@ class RecorderApp(tb.Window):
         x = self.tiny_window.winfo_x() + event.x - self._tiny_drag_x
         y = self.tiny_window.winfo_y() + event.y - self._tiny_drag_y
         self.tiny_window.geometry(f"+{x}+{y}")
+
+    def use_default_script_dir(self):
+        self.script_dir = SCRIPTS_DIR
+        if not os.path.exists(self.script_dir):
+            os.makedirs(self.script_dir)
+        self.refresh_script_list()
+        self.save_config()
+        # 開啟資料夾
+        os.startfile(self.script_dir)
+
+CONFIG_FILE = "user_config.json"
+
+def load_user_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    # 預設值
+    return {
+        "skin": "darkly",
+        "last_script": "",
+        "repeat": "1",
+        "speed": "1.0",
+        "script_dir": SCRIPTS_DIR
+    }
+
+def save_user_config(config):
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     app = RecorderApp()
